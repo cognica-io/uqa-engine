@@ -208,6 +208,57 @@ fn necessary_disjunction_and_single_reference_cte_filters_keep_order_and_cleanup
 }
 
 #[test]
+fn disjunction_pushdown_checks_calls_once_per_walk_and_copies_only_surviving_qualifiers() {
+    let fixture = Fixture::new();
+    let mut query = plan("SELECT 1 FROM (VALUES(1)) a(x),(VALUES(2)) b(y),(VALUES('')) c(z),(VALUES(4)) unused(u) WHERE (abs(a.x)=1 AND a.x>0 AND abs(b.y)=2 AND c.z='unmatched') OR (abs(b.y)=4 AND abs(a.x)=3 AND a.x<6)");
+    let RelationalPlan::QueryBlock(stmt) = &mut query.root else {
+        panic!("query block")
+    };
+    stmt.r#where.as_mut().unwrap().visit_mut(&mut |part| {
+        if let ScalarExpr::Literal(Value::Str(value)) = part {
+            if value == "unmatched" {
+                *value = "x".repeat(4 << 20);
+            }
+        }
+    });
+    let budget = MemoryBudget::new(64 << 10);
+    let token = CancellationToken::new();
+    let control = ProductionControl::new(&budget, &token, &token);
+    let filters = qualifier_filters_for_stmt_with_control(
+        fixture.context(),
+        stmt,
+        stmt.from.as_ref().unwrap(),
+        fixture.scope(),
+        &control,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(filters.len(), 2);
+    for (name, expected) in [
+        (
+            "a",
+            "SELECT (abs(a.x)=1 AND a.x>0) OR (abs(a.x)=3 AND a.x<6)",
+        ),
+        ("b", "SELECT abs(b.y)=2 OR abs(b.y)=4"),
+    ] {
+        let expected = plan(expected);
+        assert_eq!(
+            &filters[name],
+            std::slice::from_ref(&block(&expected).projections[0].expr)
+        );
+    }
+    // The whole-filter eligibility and disjunction safety checks each read the four functions once.
+    assert_eq!(
+        fixture
+            .volatility_lookups
+            .load(std::sync::atomic::Ordering::Relaxed),
+        8
+    );
+    drop(filters);
+    assert_eq!(budget.used(), 0);
+}
+
+#[test]
 fn equality_propagation_admits_selected_constants_without_mutating_source_filters() {
     let query = plan("SELECT * FROM(VALUES(1)) a(x) JOIN(VALUES(2)) b(y) ON a.x=b.y");
     let SourcePlan::Join {

@@ -64,6 +64,14 @@ pub struct MutableQueryPlan {
 }
 
 impl QueryPlan {
+    /// Move caller-owned syntax into a consuming edit and restore its result to the same slot. An error leaves an empty query in the slot.
+    pub fn edit_uncontrolled(
+        &mut self,
+        edit: impl FnOnce(MutableQueryPlan) -> Result<MutableQueryPlan, SQLError>,
+    ) -> Result<(), SQLError> {
+        edits::edit_uncontrolled(self, edit)
+    }
+
     /// Copy a complete query while keeping mutable constructor ownership separate. Every destination and ownership-record buffer is admitted before allocation; published immutable schemas retain their original shared owners.
     pub fn copy_for_rewrite(
         &self,
@@ -87,6 +95,29 @@ impl QueryPlan {
 }
 
 impl MutableQueryPlan {
+    /// Move a caller-owned query and its existing constructors into the editor.
+    #[must_use]
+    pub fn uncontrolled(query: QueryPlan) -> Self {
+        Self::from_rewrite_parts(query, None)
+    }
+
+    /// Publish a speculative replacement into the original query's ownership domain. A caller-owned query takes the successfully constructed syntax, while shared literal and schema payloads keep their individual leases.
+    pub fn commit_rewrite(
+        self,
+        replacement: Self,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self, SQLError> {
+        control.check()?;
+        if self.memory.read().is_none() && control.budget().is_some() {
+            let (query, _workspace) = replacement.finish(control)?.into_parts();
+            Ok(Self::uncontrolled(query))
+        } else {
+            self.assert_owner(control);
+            replacement.assert_owner(control);
+            Ok(replacement)
+        }
+    }
+
     pub(in crate::plan) fn from_rewrite_parts(
         query: QueryPlan,
         memory: Option<RewriteMemory>,
@@ -110,12 +141,10 @@ impl MutableQueryPlan {
     ) -> Result<Self, SQLError> {
         self.assert_owner(control);
         control.check()?;
-        let Some(mut slot) = self.scalar_slot(slot) else {
+        let Some(slot) = self.scalar_slot(slot) else {
             return Ok(self);
         };
-        let input = slot.take();
-        let output = input.rewrite(control, map)?;
-        slot.restore(output);
+        slot.rewrite(control, map)?;
         Ok(self)
     }
 

@@ -108,7 +108,7 @@ impl<K, V> SchemaMap<K, V> {
 }
 
 impl<K: Ord + Hash, V> SchemaMap<K, V> {
-    pub(super) fn from_produced(
+    pub(crate) fn from_produced(
         entries: impl IntoIterator<Item = Result<(Produced<K>, Produced<V>), crate::SQLError>>,
         control: &ProductionControl<'_>,
     ) -> Result<Self, crate::SQLError> {

@@ -6,59 +6,124 @@
 
 //! Native optimizer traversal keeps mutable constructor owners through every ordered pass.
 
-use super::{AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan};
-use uqa_core::memory::{ProductionControl, ProductionMap};
+use super::{
+    AggregateClassifier, ComputePlan, OptimizerConfig, RelationalPlan, SourcePlan, UnifiedPlan,
+};
+use uqa_core::memory::ProductionMap;
 use uqa_sql::{
     plan::{
         MutableCommandPlan, MutableExecutablePlan, MutableQueryPlan, MutableSourcePlan,
         OwnedScalarExpr, QueryChildSlot, QueryScalarSlot,
     },
-    SQLError, ScalarExpr,
+    SQLError,
 };
 
 mod block;
 mod commands;
+mod demand;
 mod sources;
+
+pub(super) fn optimize_caller(
+    mut plan: UnifiedPlan,
+    config: &OptimizerConfig<'_>,
+    aggregates: &dyn AggregateClassifier,
+) -> Result<UnifiedPlan, SQLError> {
+    let context = Context::caller(config, aggregates);
+    plan.try_visit_queries_mut(&mut |query| {
+        query.edit_uncontrolled(|query| context.initialize_compute(query))
+    })?;
+    super::source_demand::prune(&mut plan, config, aggregates)?;
+    let output = context.optimize_sources(MutableExecutablePlan::uncontrolled(plan))?;
+    Ok(output.finish(&context.scalars().storage)?.into_parts().0)
+}
 
 pub(super) fn optimize(
     plan: MutableExecutablePlan,
     config: &OptimizerConfig<'_>,
     aggregates: &dyn AggregateClassifier,
 ) -> Result<MutableExecutablePlan, SQLError> {
-    let control = &config.production;
-    let plan = plan.map_queries_while(control, &mut |mut query| {
-        if query.analyzed_output.is_none() {
-            if let RelationalPlan::QueryBlock(block) = &query.root {
-                let compute = block.compute_kind_with_control(aggregates, control)?;
-                query = query.set_compute(compute, control)?;
-            }
-        }
-        Ok((query, true))
+    let context = Context::admitted(config, aggregates);
+    let plan = plan.map_queries_while(&config.production, &mut |query| {
+        Ok((context.initialize_compute(query)?, true))
     })?;
     let plan = super::source_demand::owned::prune(plan, config, aggregates)?;
-    let plan = super::derived_pullup::owned::rewrite(plan, config)?;
-    let plan = plan.map_queries_while(control, &mut |query| {
-        let query = query
-            .prune_subqueries(control)?
-            .discard_source_analysis(control)?;
-        Ok((query, true))
-    })?;
-    Context {
-        config,
-        aggregates,
-        active: &config.active_inline_routines,
-    }
-    .plan(plan)
+    context.optimize_sources(plan)
 }
 
 pub(in crate::optimizer) struct Context<'a, 'scope> {
     pub config: &'a OptimizerConfig<'scope>,
     pub aggregates: &'a dyn AggregateClassifier,
-    pub active: &'a [[u8; 16]],
+    input: PlanInput,
 }
 
-impl Context<'_, '_> {
-    fn plan(&self, plan: MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError> {
+#[derive(Clone, Copy)]
+enum PlanInput {
+    Caller,
+    Admitted,
+}
+
+impl<'a, 'scope> Context<'a, 'scope> {
+    pub(super) fn admitted(
+        config: &'a OptimizerConfig<'scope>,
+        aggregates: &'a dyn AggregateClassifier,
+    ) -> Self {
+        Self {
+            config,
+            aggregates,
+            input: PlanInput::Admitted,
+        }
+    }
+
+    pub(super) fn caller(
+        config: &'a OptimizerConfig<'scope>,
+        aggregates: &'a dyn AggregateClassifier,
+    ) -> Self {
+        Self {
+            config,
+            aggregates,
+            input: PlanInput::Caller,
+        }
+    }
+
+    fn scalars(&self) -> super::scalar::ScalarProduction<'a, 'scope> {
+        match self.input {
+            PlanInput::Caller => super::scalar::ScalarProduction::caller(self.config),
+            PlanInput::Admitted => super::scalar::ScalarProduction::admitted(self.config),
+        }
+    }
+
+    fn initialize_compute(&self, query: MutableQueryPlan) -> Result<MutableQueryPlan, SQLError> {
+        self.config.production.check()?;
+        if query.analyzed_output.is_none() {
+            if let RelationalPlan::QueryBlock(block) = &query.root {
+                let compute =
+                    block.compute_kind_with_control(self.aggregates, &self.config.production)?;
+                return query.set_compute(compute, &self.scalars().storage);
+            }
+        }
+        Ok(query)
+    }
+
+    // Source rewrites invalidate the analyzed layout before live CTEs and constants are planned.
+    fn optimize_sources(
+        &self,
+        plan: MutableExecutablePlan,
+    ) -> Result<MutableExecutablePlan, SQLError> {
+        let storage = &self.scalars().storage;
+        let plan = super::derived_pullup::rewrite(plan, self.config, storage)?;
+        let plan = plan.map_queries_while(storage, &mut |query| {
+            let query = query
+                .prune_subqueries_with_workspace(storage, &self.config.production)?
+                .discard_source_analysis(storage)?;
+            Ok((query, true))
+        })?;
+        self.plan(plan)
+    }
+
+    pub(super) fn plan(
+        &self,
+        plan: MutableExecutablePlan,
+    ) -> Result<MutableExecutablePlan, SQLError> {
         Ok(match plan {
             MutableExecutablePlan::Query(query) => MutableExecutablePlan::Query(self.query(query)?),
             MutableExecutablePlan::Command(command) => {
@@ -71,25 +136,20 @@ impl Context<'_, '_> {
         &self,
         expression: OwnedScalarExpr,
     ) -> Result<OwnedScalarExpr, SQLError> {
-        super::scalar::owned::optimize_with_active(expression, self.config, self.active)
+        super::scalar::owned::optimize_in(expression, self.scalars())
     }
 
     fn qualification(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
-        let expression = self.scalar(expression)?;
-        if self.config.enable_boolean_simplify {
-            super::scalar::qualification::simplify_owned(
-                expression,
-                &self.config.production,
-                &self.config.production,
-            )
-        } else {
-            Ok(expression)
-        }
+        super::scalar::qualification::qualification(expression, self.scalars())
     }
 
     fn access_predicate(&self, expression: OwnedScalarExpr) -> Result<OwnedScalarExpr, SQLError> {
         if self.config.enable_filter_pushdown {
-            super::access_path::owned::prioritize(expression, &self.config.production)
+            super::access_path::owned::prioritize(
+                expression,
+                &self.scalars().storage,
+                &self.config.production,
+            )
         } else {
             Ok(expression)
         }
@@ -100,102 +160,39 @@ impl Context<'_, '_> {
         mut query: MutableQueryPlan,
     ) -> Result<MutableQueryPlan, SQLError> {
         let control = &self.config.production;
-        query = query.apply_grouping(control)?.prune_subqueries(control)?;
-        if query.analyzed_output.is_none() {
-            if let Some(routines) = &self.config.routine_inlining {
-                query = super::cte_projection::owned::prune(
-                    query,
-                    self.aggregates,
-                    routines.volatility,
-                    Some(routines.routines),
-                    *control,
-                )?;
-            }
-        }
-        let reachable =
-            uqa_sql::semantics::reachable_query_cte_order_with_control(&query, *control)?;
-        // Scalar initialization follows declaration order, even where CTE dependency analysis uses a different traversal order.
-        for index in 0..query.ctes.len() {
+        let storage = &self.scalars().storage;
+        control.check()?;
+        query = query
+            .apply_grouping(storage)?
+            .prune_subqueries_with_workspace(storage, control)?;
+        query = self.prune_cte_outputs(query)?;
+        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
+            uqa_sql::plan::PlanRef::Query(&query),
+            *control,
+        )?;
+        for (index, &selected) in reachable.iter().enumerate() {
             control.check()?;
-            if reachable.contains(&index) {
-                query = query.map_cte(index, control, |body| self.plan(body))?;
+            if selected {
+                query = query.map_cte(index, storage, |body| self.plan(body))?;
             }
         }
         drop(reachable);
         match &query.root {
-            RelationalPlan::QueryBlock(_) => self.block(query),
+            RelationalPlan::QueryBlock(_) => return self.block(query),
             RelationalPlan::SetOp { .. } => {
                 query = query
-                    .map_query_child(QueryChildSlot::Left, control, |query| self.query(query))?;
+                    .map_query_child(QueryChildSlot::Left, storage, |query| self.query(query))?;
                 query = query
-                    .map_query_child(QueryChildSlot::Right, control, |query| self.query(query))?;
-                let RelationalPlan::SetOp { order_by, .. } = &query.root else {
-                    unreachable!()
-                };
-                for index in 0..order_by.len() {
-                    query = query.map_scalar(
-                        QueryScalarSlot::OrderBy(index),
-                        control,
-                        |expression| self.scalar(expression),
-                    )?;
-                }
-                query = query.map_scalar(QueryScalarSlot::Limit, control, |expression| {
-                    self.scalar(expression)
-                })?;
-                query = query.map_scalar(QueryScalarSlot::Offset, control, |expression| {
-                    self.scalar(expression)
-                })?;
-                let RelationalPlan::SetOp {
-                    order_by,
-                    limit,
-                    offset,
-                    ..
-                } = &query.root
-                else {
-                    unreachable!()
-                };
-                let live = super::subqueries::live_slots(
-                    order_by
-                        .iter()
-                        .map(|order| &order.expr)
-                        .chain(limit.as_deref())
-                        .chain(offset.as_deref()),
-                    *control,
-                )?;
-                self.query_arena(query, &live)
+                    .map_query_child(QueryChildSlot::Right, storage, |query| self.query(query))?;
             }
-            RelationalPlan::Values { rows, .. } => {
-                if rows.iter().any(|row| !row.is_empty()) {
-                    let values = self.config.for_values_without_active()?;
-                    let nested = Context {
-                        config: &values,
-                        aggregates: self.aggregates,
-                        active: self.active,
-                    };
-                    let count = rows.len();
-                    for row in 0..count {
-                        let RelationalPlan::Values { rows, .. } = &query.root else {
-                            unreachable!()
-                        };
-                        for column in 0..rows[row].len() {
-                            query = query.map_scalar(
-                                QueryScalarSlot::Value { row, column },
-                                control,
-                                |expression| nested.scalar(expression),
-                            )?;
-                        }
-                    }
-                }
-                let RelationalPlan::Values { rows, .. } = &query.root else {
-                    unreachable!()
-                };
-                let live = super::subqueries::live_slots(rows.iter().flatten(), *control)?;
-                self.query_arena(query, &live)
-            }
+            RelationalPlan::Values { .. } => {}
         }
+        query = self.scalars().query_inputs(query)?;
+        let live = super::subqueries::live_slots_for_query(&query, *control)?;
+        self.query_arena(query, &live)
     }
 
-    fn query_arena(
+    pub(super) fn query_arena(
         &self,
         mut query: MutableQueryPlan,
         live: &ProductionMap<'_, usize, ()>,
@@ -210,30 +207,11 @@ impl Context<'_, '_> {
             if index < count {
                 query = query.map_query_child(
                     QueryChildSlot::Subquery(index),
-                    &self.config.production,
+                    &self.scalars().storage,
                     |query| self.query(query),
                 )?;
             }
         }
         Ok(query)
     }
-}
-
-fn projection_alias(
-    projection: &super::ProjectionPlan,
-    control: &ProductionControl<'_>,
-) -> Result<Option<uqa_core::memory::Produced<String>>, SQLError> {
-    if projection.alias.is_some()
-        || matches!(
-            projection.expr,
-            ScalarExpr::Star | ScalarExpr::QualifiedStar(_)
-        )
-    {
-        return Ok(None);
-    }
-    Ok(Some(uqa_sql::semantics::with_projection_label(
-        projection,
-        control,
-        |name| Ok(control.copy_text(name)?),
-    )?))
 }

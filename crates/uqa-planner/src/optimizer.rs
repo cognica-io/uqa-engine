@@ -13,9 +13,9 @@ use uqa_sql::ast::BinaryOp;
 use uqa_sql::{ScalarExpr, ScalarFrameBound};
 
 use crate::unified_plan::{
-    AccessPathPlan, AggregateClassifier, AssignmentPlan, CommandPlan, ComputePlan,
-    ConflictActionPlan, ExpressionPlan, JoinExecutionStrategy, MergeWhenPlan, ProjectionPlan,
-    QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan, UnifiedPlan,
+    AccessPathPlan, AggregateClassifier, CommandPlan, ComputePlan, ExpressionPlan,
+    JoinExecutionStrategy, ProjectionPlan, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
+    UnifiedPlan,
 };
 use crate::{
     JoinGraphError, JoinGraphResult, JoinOrderOptimizer, JoinPredicate, JoinRelation, RelationStats,
@@ -23,7 +23,6 @@ use crate::{
 
 mod access_path;
 mod api;
-mod command;
 mod cte_projection;
 mod derived_projection;
 mod derived_pullup;
@@ -36,7 +35,6 @@ mod scalar;
 mod source_constants;
 mod source_demand;
 mod subqueries;
-mod traversal;
 mod union_projection;
 
 pub use access_path::contains_retrieval;
@@ -55,15 +53,13 @@ pub use derived_projection::{
 };
 pub use implicit_fusion::query_contains_implicit_hybrid_fusion;
 
-use access_path::{choose_access_path, prioritize_access_predicates};
-use command::optimize_command;
-use implicit_fusion::{rewrite_implicit_hybrid_fusion, source_allows_unqualified_signals};
+use access_path::choose_access_path;
+use implicit_fusion::source_allows_unqualified_signals;
 use join_reorder::reorder_unified_plan_joins;
 pub(crate) use scalar::constants::{retain_computed_integer, retain_computed_integer_owned};
 pub(crate) use scalar::optimize_qualification;
 pub(crate) use scalar::optimize_qualification_owned;
-use scalar::{optimize_assignments, optimize_projections, optimize_scalar_slot};
-use traversal::{optimize_query, optimize_source, optimize_unified_plan};
+use scalar::optimize_scalar_slot;
 
 #[cfg(test)]
 mod tests;

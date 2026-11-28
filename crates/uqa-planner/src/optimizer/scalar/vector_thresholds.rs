@@ -193,6 +193,7 @@ pub(super) fn merge_owned(
     )
 }
 
+#[cfg(test)]
 pub(super) fn merge_vector_thresholds(
     expression: ScalarExpr,
     control: &ProductionControl<'_>,

@@ -8,6 +8,50 @@ use super::*;
 use crate::plan::{JoinExecutionStrategy, MutableSourcePlan, OwnedProjection, SourcePlan};
 
 #[test]
+fn speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination() {
+    for caller_owned in [false, true] {
+        for cancel in [false, true] {
+            let budget = MemoryBudget::new(4 << 20);
+            let token = CancellationToken::new();
+            let work = ProductionControl::new(&budget, &token, &token);
+            let storage = if caller_owned {
+                ProductionControl::uncontrolled()
+            } else {
+                work
+            };
+            let source = fixture();
+            let replacement = source.copy_for_rewrite(&work).unwrap();
+            let original = if caller_owned {
+                MutableQueryPlan::uncontrolled(source)
+            } else {
+                source.copy_for_rewrite(&work).unwrap()
+            };
+            let RelationalPlan::QueryBlock(before) = &replacement.root else {
+                panic!("block")
+            };
+            let projections = before.projections.as_ptr();
+            if cancel {
+                token.cancel();
+            }
+            let result = original.commit_rewrite(replacement, &work);
+            if cancel {
+                assert_eq!(result.unwrap_err().sqlstate(), Some("57014"));
+            } else {
+                let query = result.unwrap();
+                let RelationalPlan::QueryBlock(after) = &query.root else {
+                    panic!("block")
+                };
+                assert_eq!(projections, after.projections.as_ptr());
+                assert_eq!(budget.used(), query.reserved_bytes());
+                assert_eq!(budget.used() == 0, caller_owned);
+                drop(query.finish(&storage).unwrap());
+            }
+            assert_eq!(budget.used(), 0);
+        }
+    }
+}
+
+#[test]
 fn generated_query_source_and_projection_keep_exact_constructor_owners() {
     let budget = MemoryBudget::new(1 << 20);
     let token = CancellationToken::new();

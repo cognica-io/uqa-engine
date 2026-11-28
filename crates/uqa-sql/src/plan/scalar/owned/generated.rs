@@ -193,13 +193,32 @@ impl OwnedScalarExpr {
         arguments: impl ExactSizeIterator<Item = Self>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
-        crate::catalog::work::inline(Self::call_from(name, binding, arguments, control, &mut ()))
+        Self::call_with_workspace(name, binding, arguments, control, control)
+    }
+
+    /// Charge a new call and its metadata to the operation. Caller-owned arguments move into the caller's result with their original allocations.
+    pub fn call_with_workspace(
+        name: Produced<String>,
+        binding: Option<Produced<FunctionBinding>>,
+        arguments: impl ExactSizeIterator<Item = Self>,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        crate::catalog::work::inline(Self::call_from(
+            name,
+            binding,
+            arguments,
+            storage,
+            workspace,
+            &mut (),
+        ))
     }
 
     pub(crate) async fn call_from<W: Work>(
         name: Produced<String>,
         binding: Option<Produced<FunctionBinding>>,
         arguments: impl ExactSizeIterator<Item = Self>,
+        storage: &ProductionControl<'_>,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> std::result::Result<Self, W::Error>
@@ -207,7 +226,7 @@ impl OwnedScalarExpr {
         W::Error: From<CatalogRetentionError>,
     {
         control.check()?;
-        let mut lowering = owned_lowering(control);
+        let mut lowering = lowering_with_workspace(storage, control);
         let mut output = call_fields(&mut lowering, name, binding);
         let arguments = children_from(&mut lowering, arguments, work).await?;
         let ScalarExpr::Func { args, .. } = &mut *output else {
@@ -252,11 +271,26 @@ where
 }
 
 pub(super) fn owned_lowering<'a>(control: &ProductionControl<'a>) -> Lowering<'a> {
+    lowering_with_workspace(control, control)
+}
+
+pub(super) fn lowering_with_workspace<'a>(
+    storage: &ProductionControl<'_>,
+    workspace: &ProductionControl<'a>,
+) -> Lowering<'a> {
     Lowering {
-        control: control.budget().map(|_| Control::from_production(*control)),
-        owned_children: control
+        control: workspace
             .budget()
-            .map(|budget| ScalarMemory::new(budget.empty_reservation())),
+            .map(|_| Control::from_production(*workspace)),
+        owned_children: storage.budget().map(|budget| {
+            assert!(
+                workspace
+                    .budget()
+                    .is_some_and(|work| work.shares_allowance(budget)),
+                "generated scalars must retain their input allowance"
+            );
+            ScalarMemory::new(budget.empty_reservation())
+        }),
     }
 }
 
@@ -267,12 +301,13 @@ pub(super) fn finish(
 ) -> Result<OwnedScalarExpr> {
     let output = OwnedScalarExpr {
         expression,
-        memory: lowering.control.map(|control| {
+        memory: lowering.owned_children.map(|children| {
             ScalarMemory::from_parts(
-                control.memory,
                 lowering
-                    .owned_children
-                    .expect("mutable generated expression"),
+                    .control
+                    .expect("admitted scalar constructor")
+                    .memory,
+                children,
             )
         }),
     };

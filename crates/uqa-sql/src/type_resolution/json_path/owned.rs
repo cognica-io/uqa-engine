@@ -254,7 +254,8 @@ where
     let document = document
         .ok_or_else(|| W::Error::from(SQLError::Internal("JSON path input disappeared".into())))?;
     let arguments =
-        OwnedScalarExpr::boolean_from([document, path].into_iter(), false, control, work).await?;
+        OwnedScalarExpr::boolean_from([document, path].into_iter(), false, control, control, work)
+            .await?;
     let binding = binding
         .normalized_with_input_work(entry.dispatch(), control, work)
         .await?;

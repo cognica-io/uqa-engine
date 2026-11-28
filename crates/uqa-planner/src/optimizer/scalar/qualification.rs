@@ -6,10 +6,7 @@
 
 //! Simplify the top-level AND/OR tree where only TRUE admits a row.
 
-use super::{
-    constants::literal_value_with_control, optimize_scalar_slot, OptimizerConfig, SQLError,
-    ScalarExpr, Value,
-};
+use super::{constants::literal_value_with_control, OptimizerConfig, SQLError, ScalarExpr, Value};
 use uqa_core::memory::ProductionControl;
 use uqa_sql::plan::OwnedScalarExpr;
 
@@ -17,33 +14,30 @@ pub(crate) fn optimize_qualification_owned(
     expression: OwnedScalarExpr,
     config: &OptimizerConfig<'_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
-    let expression = super::owned::optimize(expression, config)?;
-    if config.enable_boolean_simplify {
-        simplify_owned(expression, &config.production, &config.production)
-    } else {
-        Ok(expression)
-    }
+    qualification(expression, super::ScalarProduction::admitted(config))
 }
 
 pub(crate) fn optimize_qualification(
     expression: &mut ScalarExpr,
     config: &OptimizerConfig<'_>,
 ) -> Result<(), SQLError> {
-    // Fold every reachable constant first, retaining planning-error order before the qualification can discard a nullable branch.
-    optimize_scalar_slot(expression, config)?;
-    if config.enable_boolean_simplify {
-        let input = std::mem::replace(expression, ScalarExpr::Literal(Value::Null));
-        let storage = ProductionControl::uncontrolled();
-        *expression = simplify_owned(
-            OwnedScalarExpr::uncontrolled(input),
-            &storage,
-            &config.production,
-        )?
-        .finish(&storage)?
-        .into_uncontrolled()
-        .expect("ordinary qualification owner");
+    super::rewrite_ordinary_slot(expression, config, qualification)
+}
+
+pub(in crate::optimizer) fn qualification(
+    expression: OwnedScalarExpr,
+    production: super::ScalarProduction<'_, '_>,
+) -> Result<OwnedScalarExpr, SQLError> {
+    let expression = super::owned::optimize_in(expression, production)?;
+    if production.config.enable_boolean_simplify {
+        simplify_owned(
+            expression,
+            &production.storage,
+            &production.config.production,
+        )
+    } else {
+        Ok(expression)
     }
-    Ok(())
 }
 
 pub(in crate::optimizer) fn simplify_owned(
@@ -207,7 +201,7 @@ mod tests {
     fn nullable_scalar_and_boolean_tests_keep_their_observations() {
         let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
         let mut scalar = expression("SELECT nextval('ticks') > 0 AND NULL::boolean");
-        optimize_scalar_slot(&mut scalar, &config).unwrap();
+        super::super::optimize_scalar_slot(&mut scalar, &config).unwrap();
         assert!(matches!(scalar, ScalarExpr::And(_)));
         for sql in [
             "SELECT (nextval('ticks') > 0 AND NULL::boolean) IS NOT FALSE",

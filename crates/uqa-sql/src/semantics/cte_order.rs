@@ -13,7 +13,7 @@ pub(super) mod references;
 mod tests;
 
 use crate::{
-    plan::{CommandPlan, CtePlan, QueryPlan},
+    plan::{CommandPlan, CtePlan, PlanRef, QueryPlan},
     SQLError,
 };
 use analysis::CteAnalysis;
@@ -33,6 +33,21 @@ pub fn reachable_command_cte_order_with_control(
     control: ProductionControl<'_>,
 ) -> Result<Produced<Vec<usize>>, SQLError> {
     reachable_order(&CteAnalysis::command(command, control)?, control)
+}
+
+/// Select definitions for scalar initialization in declaration order. Recursive dependency cycles are rejected even among unread definitions.
+pub fn reachable_cte_declarations_with_control(
+    statement: PlanRef<'_>,
+    control: ProductionControl<'_>,
+) -> Result<Produced<Vec<bool>>, SQLError> {
+    let analysis = match statement {
+        PlanRef::Query(query) => CteAnalysis::query(query, control)?,
+        PlanRef::Command(command) => CteAnalysis::command(command, control)?,
+    };
+    if analysis.plans.iter().any(|plan| plan.recursive) {
+        drop(analysis.order()?);
+    }
+    analysis.reachable()
 }
 
 fn reachable_order(

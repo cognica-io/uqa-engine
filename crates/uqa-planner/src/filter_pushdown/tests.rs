@@ -283,9 +283,7 @@ fn disjunction_derives_a_necessary_filter_for_every_complete_source_projection()
     let derived = derived_disjunctive_qualifier_filters(
         context,
         &predicate,
-        &qualifiers,
-        &SourceColumns::listed(BTreeMap::new(), qualifiers.clone()),
-        &[],
+        &SourceColumns::listed(BTreeMap::new(), qualifiers),
     );
     assert_eq!(derived.len(), 2);
     for (qualifier, predicate) in derived {
@@ -313,9 +311,7 @@ fn disjunction_does_not_push_a_projection_missing_from_any_branch() {
         derived_disjunctive_qualifier_filters(
             context,
             &predicate,
-            &qualifiers,
-            &SourceColumns::listed(BTreeMap::new(), qualifiers.clone()),
-            &[],
+            &SourceColumns::listed(BTreeMap::new(), qualifiers),
         )
         .len(),
         0
