@@ -6,7 +6,6 @@
 
 //! Node-API binding for authenticated local and Cloud HTTP SQL.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use napi::bindgen_prelude::{AsyncBlock, AsyncBlockBuilder, Env, Error, Result};
@@ -16,11 +15,10 @@ use uqa_client::{
     HttpEngine as CoreHttpEngine, HttpEngineError, SQLStream as CoreSQLStream,
     SQLStreamFrame as CoreSQLStreamFrame, SecretString,
 };
-use uqa_sql::SQLParam as CoreSQLParam;
 
 use crate::input::{batch_from_input, js_number_from_usize, params_from_input, ParamInput};
 use crate::results::SQLResult;
-use crate::value::JSValue;
+use crate::value::JSRow;
 
 #[napi]
 pub struct HttpEngine {
@@ -49,7 +47,8 @@ pub struct HttpSQLBatchExecution {
 pub struct HttpSQLStreamFrame {
     pub r#type: String,
     pub columns: Option<Vec<String>>,
-    pub row: Option<BTreeMap<String, JSValue>>,
+    #[napi(ts_type = "Record<string, JSValue>")]
+    pub row: Option<JSRow>,
     pub row_count: Option<i64>,
     pub spilled_to_disk: Option<bool>,
     pub request_id: Option<String>,
@@ -192,7 +191,7 @@ impl HttpEngine {
         let statements = batch_from_input(statements)?;
         let inner = Arc::clone(&self.inner);
         AsyncBlockBuilder::new(async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             inner
                 .sql_batch(&borrowed)
                 .await
@@ -213,7 +212,7 @@ impl HttpEngine {
         let statements = batch_from_input(statements)?;
         let inner = Arc::clone(&self.inner);
         AsyncBlockBuilder::new(async move {
-            let borrowed = borrowed_statements(&statements);
+            let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
             let output = inner
                 .sql_batch_with_metadata(&borrowed)
                 .await
@@ -306,11 +305,7 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
             }
             CoreSQLStreamFrame::Row { row } => {
                 output.r#type = String::from("row");
-                output.row = Some(
-                    row.into_iter()
-                        .map(|(key, value)| (key, JSValue(value)))
-                        .collect(),
-                );
+                output.row = Some(JSRow(row));
             }
             CoreSQLStreamFrame::Complete {
                 row_count,
@@ -335,13 +330,6 @@ impl TryFrom<CoreSQLStreamFrame> for HttpSQLStreamFrame {
         }
         Ok(output)
     }
-}
-
-fn borrowed_statements(statements: &[(String, Vec<CoreSQLParam>)]) -> Vec<(&str, &[CoreSQLParam])> {
-    statements
-        .iter()
-        .map(|(query, params)| (query.as_str(), params.as_slice()))
-        .collect()
 }
 
 fn http_error(error: HttpEngineError) -> Error {

@@ -18,12 +18,24 @@ fn array<const N: usize>(input: &[u8], name: &str) -> Result<[u8; N]> {
         .map_err(|_| Error::from_reason(format!("{name} must contain {N} bytes")))
 }
 
+fn backup_identity<'a, T>(value: &'a [u8], name: &str) -> Result<T>
+where
+    T: TryFrom<&'a [u8], Error = core::ParseBackupIdentityError>,
+{
+    T::try_from(value).map_err(|error| match error {
+        core::ParseBackupIdentityError::Length => {
+            Error::from_reason(format!("{name} must contain 16 bytes"))
+        }
+        core::ParseBackupIdentityError::Invalid(error) => runtime_error(error),
+    })
+}
+
 pub(super) fn backup_id(input: &[u8]) -> Result<core::BackupId> {
-    core::BackupId::from_bytes(array(input, "backup ID")?).map_err(runtime_error)
+    backup_identity(input, "backup ID")
 }
 
 pub(super) fn restore_id(input: &[u8]) -> Result<core::RestoreId> {
-    core::RestoreId::from_bytes(array(input, "restore ID")?).map_err(runtime_error)
+    backup_identity(input, "restore ID")
 }
 
 pub(super) fn positive(n: f64, field: &str) -> Result<usize> {
@@ -69,8 +81,7 @@ impl BackupRepositoryOptions {
         let protection = match (self.protection_domain, self.key) {
             (None, None) => core::Protection::Plaintext,
             (Some(domain), Some(key)) => core::Protection::Encrypted {
-                domain: core::ProtectionId::from_bytes(array(&domain, "protectionDomain")?)
-                    .map_err(runtime_error)?,
+                domain: backup_identity(&domain, "protectionDomain")?,
                 key: core::BackupKey::new(array(&key, "repository key")?),
             },
             _ => {

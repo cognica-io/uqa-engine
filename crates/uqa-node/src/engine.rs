@@ -13,10 +13,9 @@ use super::callbacks::{
     JSFunctionOptions, JSScalarFunction, JSTableFunction, SynchronousJSValue,
 };
 use super::input::{
-    batch_from_input, compression_options, database_file_format_name, doc_id_from_input,
-    f32_from_f64, js_number_from_u64, labels_from_input, params_from_input, parse_scoring_params,
-    runtime_error, scoring_mode, tensor_from_f64, usize_from_u32, vector_from_f64,
-    vector_from_input, ParamInput,
+    batch_from_input, compression_options, doc_id_from_input, f32_from_f64, js_number_from_u64,
+    labels_from_input, params_from_input, parse_scoring_params, runtime_error, scoring_mode,
+    tensor_from_f64, usize_from_u32, vector_from_f64, vector_from_input, ParamInput,
 };
 use super::results::{
     cypher_result, search_hits, CompressionOptions, SQLNotice, SQLResult, SearchHit,
@@ -26,10 +25,9 @@ use super::tasks::{
     LearnScoringParamsTask, RobustHybridSearchTask, RunCypherTask, SQLBatchTask, SQLTask,
     SearchTask, VectorSimilarityTask,
 };
-use super::value::{document_from_js, JSValue};
+use super::value::{document_from_js, JSRow, JSValue};
 use super::{
-    napi, AsyncTask, BTreeMap, CoreEngine, CoreSQLParam, Either, Error, Float32Array, Function,
-    Path, Result,
+    napi, AsyncTask, BTreeMap, CoreEngine, Either, Error, Float32Array, Function, Path, Result,
 };
 
 // ---------------------------------------------------------------------
@@ -135,7 +133,7 @@ impl Engine {
     pub fn detect_database_file(path: String) -> Result<String> {
         let format = CoreEngine::detect_database_file(Path::new(&path))
             .map_err(|err| Error::from_reason(err.to_string()))?;
-        Ok(database_file_format_name(format).to_string())
+        Ok(format.as_str().to_string())
     }
 
     #[napi(ts_return_type = "Promise<SQLResult>")]
@@ -179,10 +177,7 @@ impl Engine {
         statements: Vec<(String, Vec<ParamInput>)>,
     ) -> Result<Vec<SQLResult>> {
         let statements = batch_from_input(statements)?;
-        let borrowed: Vec<(&str, &[CoreSQLParam])> = statements
-            .iter()
-            .map(|(sql, params)| (sql.as_str(), params.as_slice()))
-            .collect();
+        let borrowed = uqa_sql::params::borrow_sql_batch(&statements);
         self.inner()?
             .sql_batch_with_labels(&borrowed)
             .map_err(runtime_error)?
@@ -342,22 +337,12 @@ impl Engine {
             .map_err(runtime_error)
     }
 
-    #[napi]
-    pub fn get_document(
-        &self,
-        table: String,
-        doc_id: i64,
-    ) -> Result<Option<BTreeMap<String, JSValue>>> {
-        Ok(self
-            .inner()?
+    #[napi(ts_return_type = "Record<string, JSValue> | null")]
+    pub fn get_document(&self, table: String, doc_id: i64) -> Result<Option<JSRow>> {
+        self.inner()?
             .get_document(&table, doc_id_from_input(doc_id)?)
-            .map_err(runtime_error)?
-            .map(|document| {
-                document
-                    .into_iter()
-                    .map(|(key, value)| (key, JSValue(value)))
-                    .collect()
-            }))
+            .map(|document| document.map(JSRow))
+            .map_err(runtime_error)
     }
 
     #[napi]

@@ -43,18 +43,8 @@ pub struct BackupProgress {
 
 impl From<core::BackupCaptureProgress> for BackupProgress {
     fn from(value: core::BackupCaptureProgress) -> Self {
-        use uqa_engine::backup::BackupCapturePhase as Phase;
-        let phase = match value.phase {
-            Phase::Capturing => "capturing",
-            Phase::Verifying => "verifying",
-            Phase::Prepared => "prepared",
-            Phase::Complete => "complete",
-            Phase::Cancelling => "cancelling",
-            Phase::Cancelled => "cancelled",
-            Phase::Failed => "failed",
-        };
         Self {
-            phase: phase.into(),
+            phase: value.phase.as_str().into(),
             visited_positions: value.source.visited_positions.into(),
             copied_payload_bytes: value.source.copied_payload_bytes.into(),
             metadata_read_bytes: value.source.metadata_read_bytes.into(),
@@ -254,14 +244,11 @@ impl BackupJob {
         let positions = positive(maximum_positions, "maximumPositions")?;
         let bytes = positive(maximum_bytes, "maximumBytes")?;
         Ok(with_job(&self.inner, move |job| {
-            Ok(
-                match job.advance(positions, bytes).map_err(runtime_error)? {
-                    core::BackupCaptureStep::Pending => "pending",
-                    core::BackupCaptureStep::Prepared => "prepared",
-                    core::BackupCaptureStep::Complete => "complete",
-                }
-                .into(),
-            )
+            Ok(job
+                .advance(positions, bytes)
+                .map_err(runtime_error)?
+                .as_str()
+                .to_owned())
         }))
     }
 
@@ -289,19 +276,6 @@ impl BackupJob {
     }
 }
 
-fn phase(value: core::RestorePhase) -> String {
-    match value {
-        core::RestorePhase::Reading => "reading",
-        core::RestorePhase::Validating => "validating",
-        core::RestorePhase::Prepared => "prepared",
-        core::RestorePhase::Publishing => "publishing",
-        core::RestorePhase::Complete => "complete",
-        core::RestorePhase::Cancelled => "cancelled",
-        core::RestorePhase::Failed => "failed",
-    }
-    .into()
-}
-
 #[napi]
 impl RestoreJob {
     /// Release this handle and its leases. A durable restore can be resumed by ID.
@@ -322,14 +296,16 @@ impl RestoreJob {
 
     #[napi(ts_return_type = "Promise<RestorePhase>")]
     pub fn phase(&self) -> AsyncTask<BackupTask<String>> {
-        with_job(&self.inner, |job| Ok(phase(job.phase())))
+        with_job(&self.inner, |job| Ok(job.phase().as_str().to_owned()))
     }
 
     #[napi(ts_return_type = "Promise<RestorePhase>")]
     pub fn advance(&self, maximum_object_bytes: f64) -> Result<AsyncTask<BackupTask<String>>> {
         let bytes = positive(maximum_object_bytes, "maximumObjectBytes")?;
         Ok(with_job(&self.inner, move |job| {
-            job.advance(bytes).map(phase).map_err(runtime_error)
+            job.advance(bytes)
+                .map(|value| value.as_str().to_owned())
+                .map_err(runtime_error)
         }))
     }
 

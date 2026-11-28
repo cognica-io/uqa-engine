@@ -9,8 +9,8 @@
 use super::results::{CompressionOptions, SQLParam};
 use super::value::value_from_unknown;
 use super::{
-    BM25Params, BTreeMap, ClassInstance, CoreEngine, CoreSQLParam, DatabaseFileFormat, Either,
-    Error, Float32Array, Result, SQLiteCompressionOptions, ScoringMode, Unknown, MAX_SAFE_INTEGER,
+    BTreeMap, ClassInstance, CoreEngine, CoreSQLParam, Either, Error, Float32Array, Result,
+    SQLiteCompressionOptions, ScoringMode, Unknown, MAX_SAFE_INTEGER,
 };
 
 pub(super) fn vector_from_input(
@@ -158,25 +158,13 @@ pub(super) fn compression_options(
         level: None,
     });
     let codec = options.codec.as_deref().unwrap_or("zstd");
-    let mut resolved = match codec.to_ascii_lowercase().as_str() {
-        "zstd" => SQLiteCompressionOptions::zstd(),
-        "lz4" => SQLiteCompressionOptions::lz4(),
-        other => {
-            return Err(Error::from_reason(format!(
-                "unsupported compression codec `{other}`"
-            )));
-        }
-    };
-    if let Some(value) = options.page_size {
-        resolved.page_size = value;
-    }
-    if let Some(value) = options.chunk_pages {
-        resolved.chunk_pages = value;
-    }
-    if let Some(value) = options.level {
-        resolved.level = value;
-    }
-    resolved.validate().map_err(Error::from_reason)
+    SQLiteCompressionOptions::from_parts(
+        codec.parse().map_err(Error::from_reason)?,
+        options.page_size,
+        options.chunk_pages,
+        options.level,
+    )
+    .map_err(Error::from_reason)
 }
 
 pub(super) fn scoring_mode(
@@ -185,27 +173,9 @@ pub(super) fn scoring_mode(
     field: &str,
     scoring: &str,
 ) -> Result<ScoringMode> {
-    match scoring.to_ascii_lowercase().as_str() {
-        "bm25" => Ok(ScoringMode::BM25(BM25Params::default())),
-        "bayesian" | "bayesian_bm25" => Ok(ScoringMode::BayesianBM25(
-            engine
-                .bayesian_params_for(table, field)
-                .map_err(runtime_error)?,
-        )),
-        other => Err(Error::from_reason(format!(
-            "unsupported scoring mode `{other}`"
-        ))),
-    }
-}
-
-pub(super) fn database_file_format_name(format: DatabaseFileFormat) -> &'static str {
-    match format {
-        DatabaseFileFormat::Missing => "missing",
-        DatabaseFileFormat::PlainSQLite => "sqlite",
-        DatabaseFileFormat::CompressedContainer { encrypted: false } => "compressed",
-        DatabaseFileFormat::CompressedContainer { encrypted: true } => "compressed_encrypted",
-        DatabaseFileFormat::Unrecognized => "unrecognized",
-    }
+    engine
+        .resolve_scoring_mode(table, field, scoring.parse().map_err(Error::from_reason)?)
+        .map_err(runtime_error)
 }
 
 pub(super) fn parse_scoring_params(name: &str, json: &str) -> Result<BTreeMap<String, f64>> {

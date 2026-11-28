@@ -32,8 +32,8 @@ use uqa_engine::{
     Engine as CoreEngine, HybridSearchParams, RobustHybridSearchParams, SQLParam as CoreSQLParam,
     SQLResult as CoreSQLResult, ScoredEntry, ScoringMode,
 };
-use uqa_scoring::{BM25Params, CalibrationReport as CoreCalibrationReport};
-use uqa_storage_sqlite::{DatabaseFileFormat, SQLiteCompressionOptions};
+use uqa_scoring::CalibrationReport as CoreCalibrationReport;
+use uqa_storage_sqlite::SQLiteCompressionOptions;
 
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 

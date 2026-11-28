@@ -290,6 +290,26 @@ test("DiskANN example preserves canonical scores and committed rows through reop
   }
 });
 
+test("native result objects keep nested JSON numbers, ordering, and independent rows", async () => {
+  const engine = new uqa.Engine();
+  try {
+    const query = `SELECT '{"z":[9223372036854775807,18446744073709551615,1.25],"a":null}'::json AS payload,
+                  ARRAY[1,2] AS numbers FROM generate_series(1,2)`;
+    const result = await engine.sql(query);
+    assert.deepEqual(result, engine.sqlSync(query));
+    assert.deepEqual(result.columns, ["payload", "numbers"]);
+    assert.deepEqual(Object.keys(result.rows[0]), ["numbers", "payload"]);
+    assert.deepEqual(Object.keys(result.rows[0].payload), ["a", "z"]);
+    assert.deepEqual(result.rows[0].payload.z, [9223372036854775807n, Number("18446744073709551615"), 1.25]);
+    result.rows[0].numbers[0] = 9;
+    result.rows[0].payload.z.length = 0;
+    assert.deepEqual(result.rows[1].numbers, [1, 2]);
+    assert.equal(result.rows[1].payload.z.length, 3);
+  } finally {
+    engine.close();
+  }
+});
+
 test("sql, params, vector, tensor, and cypher surfaces", async () => {
   const engine = new uqa.Engine();
   const created = await engine.sql(

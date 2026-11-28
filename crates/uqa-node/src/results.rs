@@ -7,7 +7,7 @@
 //! Node-API result objects and SQL parameter wrappers.
 
 use super::input::{js_number_from_u64, js_number_from_usize, tensor_from_f64, vector_from_input};
-use super::value::{value_from_unknown, JSValue};
+use super::value::{value_from_unknown, JSRows};
 use super::{
     napi, BTreeMap, CoreCalibrationReport, CoreSQLParam, CoreSQLResult, Either, Error,
     Float32Array, PythonMigrationReport, Result, ScoredEntry, Unknown, Value,
@@ -20,7 +20,8 @@ use super::{
 #[napi(object, js_name = "SQLResult")]
 pub struct SQLResult {
     pub columns: Vec<String>,
-    pub rows: Vec<BTreeMap<String, JSValue>>,
+    #[napi(ts_type = "Array<Record<string, JSValue>>")]
+    pub rows: JSRows,
     pub affected_rows: i64,
 }
 
@@ -30,15 +31,7 @@ impl TryFrom<CoreSQLResult> for SQLResult {
     fn try_from(result: CoreSQLResult) -> Result<Self> {
         Ok(Self {
             columns: result.columns,
-            rows: result
-                .rows
-                .into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|(key, value)| (key, JSValue(value)))
-                        .collect()
-                })
-                .collect(),
+            rows: JSRows(result.rows),
             affected_rows: js_number_from_u64(result.affected_rows, "affected row count")?,
         })
     }
@@ -47,14 +40,7 @@ impl TryFrom<CoreSQLResult> for SQLResult {
 pub(super) fn cypher_result(columns: Vec<String>, rows: Vec<BTreeMap<String, Value>>) -> SQLResult {
     SQLResult {
         columns,
-        rows: rows
-            .into_iter()
-            .map(|row| {
-                row.into_iter()
-                    .map(|(key, value)| (key, JSValue(value)))
-                    .collect()
-            })
-            .collect(),
+        rows: JSRows(rows),
         affected_rows: 0,
     }
 }
