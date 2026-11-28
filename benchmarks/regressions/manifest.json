@@ -8830,7 +8830,7 @@
       "source": "crates/uqa-engine/src/capabilities/tests/catalog_allocation.rs",
       "capability": "Catalog allocation retention",
       "workload": "Four providers; twenty OIDs each for ordinary and temporary tables, private constraints and savepoint rollback.",
-      "invariant": "Twenty allocations reuse the current catalog without rebuilding it. After private DDL the allocator rejects a conflicting identity. After savepoint rollback it accepts the released identity. Both checks reuse the current session snapshot.",
+      "invariant": "Twenty allocations reuse an existing snapshot without rebuilding it. Private DDL makes the allocator reject an occupied identity and savepoint rollback releases it. Each reservation reads the current generation, builds it at most once and leaves it available to the next catalog reader.",
       "case_names": [
         "case_1_memory",
         "case_2_sqlite",

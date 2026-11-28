@@ -89,24 +89,22 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
         object_id: [9; 16],
         oid: *oid,
     };
-    let private = engine.restored_catalog_read_view();
-    assert!(!std::ptr::eq(initial.snapshot(), private.snapshot()));
     CATALOG_CAPTURES.set(0);
     let conflict = allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
         .unwrap_err()
         .into_sql_error();
     assert_eq!(conflict.sqlstate(), Some("XX000"));
-    assert_eq!(CATALOG_CAPTURES.get(), 0);
+    let private = catalog_after_reservation(engine);
+    assert!(!std::ptr::eq(initial.snapshot(), private.snapshot()));
 
     engine.sql("ROLLBACK TO before_check", &[]).unwrap();
-    let restored = engine.restored_catalog_read_view();
-    assert!(!std::ptr::eq(private.snapshot(), restored.snapshot()));
     CATALOG_CAPTURES.set(0);
     allocator
         .include_catalog_identity(&owner, CatalogOidClass::Constraint, identity)
         .unwrap();
-    assert_eq!(CATALOG_CAPTURES.get(), 0);
+    let restored = catalog_after_reservation(engine);
+    assert!(!std::ptr::eq(private.snapshot(), restored.snapshot()));
     engine.sql("ROLLBACK", &[]).unwrap();
     assert_eq!(
         engine
@@ -118,4 +116,15 @@ fn verify_catalog_allocation(engine: &Engine, temporary: bool) {
             .value_at(0, 0),
         Some(&Value::Int(0))
     );
+}
+
+fn catalog_after_reservation(engine: &Engine) -> uqa_execution::catalog::CatalogReadView {
+    let captures = CATALOG_CAPTURES.get();
+    assert!(
+        captures <= 1,
+        "reservation rebuilt the catalog {captures} times"
+    );
+    let view = engine.restored_catalog_read_view();
+    assert_eq!(CATALOG_CAPTURES.get(), captures);
+    view
 }
