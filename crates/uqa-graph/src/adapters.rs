@@ -10,11 +10,11 @@
 //! functors: no operator/morphism map is defined, so category identity and
 //! composition laws are not part of their contract.
 
-use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use uqa_core::{Payload, PostingEntry, PostingList};
 
-use crate::posting_list::{GraphPayload, GraphPostingList, GraphPostingListResult};
+use crate::posting_list::{GraphPostingList, GraphPostingListResult};
 
 /// Versioned codec between graph side-table storage and an ordinary posting
 /// payload. Encoding preserves graph metadata rather than stripping it.
@@ -43,22 +43,13 @@ impl PostingToGraphAdapter {
         &self,
         posting: PostingList,
     ) -> GraphPostingListResult<GraphPostingList> {
-        let all_vertices: Vec<u64> = posting.iter().map(|entry| entry.doc_id).collect();
-        let graph_payloads: BTreeMap<u64, GraphPayload> = posting
-            .iter()
-            .map(|entry| {
-                (
-                    entry.doc_id,
-                    GraphPayload {
-                        subgraph_vertices: all_vertices.clone(),
-                        subgraph_edges: Vec::new(),
-                        graph_name: String::new(),
-                        score_override: Some(entry.payload.score),
-                    },
-                )
-            })
-            .collect();
-        GraphPostingList::try_from_parts(posting, graph_payloads)
+        let vertices = posting.doc_ids().collect();
+        Ok(GraphPostingList::with_shared_subgraph(
+            posting,
+            vertices,
+            Arc::default(),
+            Arc::default(),
+        ))
     }
 }
 
@@ -109,6 +100,7 @@ impl TextTfScoreNormalizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn entry(doc_id: u64, score: f64, positions: Vec<u32>) -> PostingEntry {
         PostingEntry {
@@ -131,7 +123,7 @@ mod tests {
             .attach_shared_vertex_context(posting)
             .unwrap();
         let payload = graph.get_graph_payload(1).unwrap();
-        assert_eq!(payload.subgraph_vertices, vec![1, 2]);
+        assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2]);
         assert_eq!(payload.subgraph_edges.len(), 0);
         assert_eq!(payload.score_override, Some(0.5));
     }

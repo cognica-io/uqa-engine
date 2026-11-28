@@ -6,6 +6,8 @@
 
 //! Constraint-pruned subgraph-isomorphism matching.
 
+use std::sync::Arc;
+
 use super::{
     graph_id_value, synthetic_doc_id, BTreeMap, BTreeSet, DocId, Edge, EdgeId, EdgePattern,
     GraphPattern, GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult,
@@ -32,6 +34,18 @@ pub struct GMatch<'a> {
     pub pattern: GraphPattern,
     pub graph: &'a str,
     pub score: f64,
+}
+
+fn sorted_match_ids<const N: usize>(mut ids: [u64; N]) -> Arc<[u64]> {
+    ids.sort_unstable();
+    let mut kept = 0;
+    for index in 0..ids.len() {
+        if kept == 0 || ids[kept - 1] != ids[index] {
+            ids[kept] = ids[index];
+            kept += 1;
+        }
+    }
+    Arc::from(&ids[..kept])
 }
 
 impl<'a> GMatch<'a> {
@@ -88,6 +102,7 @@ impl<'a> GMatch<'a> {
         }
 
         let mut entries: Vec<PostingEntry> = Vec::with_capacity(matches.len());
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for (i, m) in matches.iter().enumerate() {
             let doc_id = synthetic_doc_id(i, "GMatch")?;
@@ -110,9 +125,9 @@ impl<'a> GMatch<'a> {
             graph_payloads.insert(
                 doc_id,
                 GraphPayload {
-                    subgraph_vertices,
-                    subgraph_edges,
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: subgraph_vertices.into(),
+                    subgraph_edges: subgraph_edges.into(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(self.score),
                 },
             );
@@ -145,27 +160,28 @@ impl<'a> GMatch<'a> {
 
         let mut seen_assignments: BTreeSet<(VertexId, VertexId)> = BTreeSet::new();
         let mut entries: Vec<PostingEntry> = Vec::new();
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for edge in edge_list {
             if !edge_pattern.satisfies(&edge) {
                 continue;
             }
-            let source = store.get_vertex(edge.source_id)?.ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "edge {} references missing source vertex {}",
-                    edge.edge_id, edge.source_id
-                ))
-            })?;
-            if !source_pattern.satisfies(&source) {
+            if !endpoint_matches(
+                store,
+                edge.edge_id,
+                edge.source_id,
+                "source",
+                source_pattern,
+            )? {
                 continue;
             }
-            let target = store.get_vertex(edge.target_id)?.ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "edge {} references missing target vertex {}",
-                    edge.edge_id, edge.target_id
-                ))
-            })?;
-            if !target_pattern.satisfies(&target) {
+            if !endpoint_matches(
+                store,
+                edge.edge_id,
+                edge.target_id,
+                "target",
+                target_pattern,
+            )? {
                 continue;
             }
             if !seen_assignments.insert((edge.source_id, edge.target_id)) {
@@ -190,15 +206,12 @@ impl<'a> GMatch<'a> {
                     fields,
                 },
             ));
-            let mut subgraph_vertices = vec![edge.source_id, edge.target_id];
-            subgraph_vertices.sort_unstable();
-            subgraph_vertices.dedup();
             graph_payloads.insert(
                 doc_id,
                 GraphPayload {
-                    subgraph_vertices,
-                    subgraph_edges: vec![edge.edge_id],
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: sorted_match_ids([edge.source_id, edge.target_id]),
+                    subgraph_edges: [edge.edge_id].into(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: Some(self.score),
                 },
             );
@@ -210,30 +223,37 @@ impl<'a> GMatch<'a> {
         )?))
     }
 
-    fn try_execute_two_edge_path<G: GraphStore>(
-        &self,
-        store: &G,
-    ) -> GraphStoreResult<Option<GraphPostingList>> {
+    fn directed_two_edge_pattern(&self) -> Option<(&EdgePattern, &EdgePattern)> {
         if self.pattern.vertex_patterns.len() != 3 || self.pattern.edge_patterns.len() != 2 {
-            return Ok(None);
+            return None;
         }
         let edge_patterns = &self.pattern.edge_patterns;
         if edge_patterns.iter().any(|edge| edge.negated) {
-            return Ok(None);
+            return None;
         }
         let (first, second) = if edge_patterns[0].target_var == edge_patterns[1].source_var {
             (&edge_patterns[0], &edge_patterns[1])
         } else if edge_patterns[1].target_var == edge_patterns[0].source_var {
             (&edge_patterns[1], &edge_patterns[0])
         } else {
-            return Ok(None);
+            return None;
         };
         if first.source_var == first.target_var
             || second.source_var == second.target_var
             || first.source_var == second.target_var
         {
-            return Ok(None);
+            return None;
         }
+        Some((first, second))
+    }
+
+    fn try_execute_two_edge_path<G: GraphStore>(
+        &self,
+        store: &G,
+    ) -> GraphStoreResult<Option<GraphPostingList>> {
+        let Some((first, second)) = self.directed_two_edge_pattern() else {
+            return Ok(None);
+        };
         let Some(source_pattern) = self.vertex_pattern(&first.source_var) else {
             return Ok(None);
         };
@@ -247,28 +267,29 @@ impl<'a> GMatch<'a> {
         let first_edges = self.edge_list_for_pattern(store, first)?;
         let mut seen_assignments: BTreeSet<(VertexId, VertexId, VertexId)> = BTreeSet::new();
         let mut entries: Vec<PostingEntry> = Vec::new();
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
 
         for first_edge in first_edges {
             if !first.satisfies(&first_edge) {
                 continue;
             }
-            let source = store.get_vertex(first_edge.source_id)?.ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "edge {} references missing source vertex {}",
-                    first_edge.edge_id, first_edge.source_id
-                ))
-            })?;
-            if !source_pattern.satisfies(&source) {
+            if !endpoint_matches(
+                store,
+                first_edge.edge_id,
+                first_edge.source_id,
+                "source",
+                source_pattern,
+            )? {
                 continue;
             }
-            let middle = store.get_vertex(first_edge.target_id)?.ok_or_else(|| {
-                GraphStoreError::CorruptGraph(format!(
-                    "edge {} references missing middle vertex {}",
-                    first_edge.edge_id, first_edge.target_id
-                ))
-            })?;
-            if !middle_pattern.satisfies(&middle) {
+            if !endpoint_matches(
+                store,
+                first_edge.edge_id,
+                first_edge.target_id,
+                "middle",
+                middle_pattern,
+            )? {
                 continue;
             }
 
@@ -284,13 +305,13 @@ impl<'a> GMatch<'a> {
                 {
                     continue;
                 }
-                let target = store.get_vertex(second_edge.target_id)?.ok_or_else(|| {
-                    GraphStoreError::CorruptGraph(format!(
-                        "edge {} references missing target vertex {}",
-                        second_edge.edge_id, second_edge.target_id
-                    ))
-                })?;
-                if !target_pattern.satisfies(&target) {
+                if !endpoint_matches(
+                    store,
+                    second_edge.edge_id,
+                    second_edge.target_id,
+                    "target",
+                    target_pattern,
+                )? {
                     continue;
                 }
                 let assignment = (
@@ -301,14 +322,17 @@ impl<'a> GMatch<'a> {
                 if !seen_assignments.insert(assignment) {
                     continue;
                 }
-                self.push_two_edge_path_match(
+                let doc_id = synthetic_doc_id(entries.len(), "two-edge GMatch")?;
+                let (entry, payload) = self.two_edge_path_match(
                     first,
                     second,
                     &first_edge,
                     &second_edge,
-                    &mut entries,
-                    &mut graph_payloads,
+                    doc_id,
+                    &graph_name,
                 )?;
+                entries.push(entry);
+                graph_payloads.insert(doc_id, payload);
             }
         }
 
@@ -318,16 +342,15 @@ impl<'a> GMatch<'a> {
         )?))
     }
 
-    fn push_two_edge_path_match(
+    fn two_edge_path_match(
         &self,
         first: &EdgePattern,
         second: &EdgePattern,
         first_edge: &Edge,
         second_edge: &Edge,
-        entries: &mut Vec<PostingEntry>,
-        graph_payloads: &mut BTreeMap<DocId, GraphPayload>,
-    ) -> GraphStoreResult<()> {
-        let doc_id = synthetic_doc_id(entries.len(), "two-edge GMatch")?;
+        doc_id: DocId,
+        graph_name: &Arc<str>,
+    ) -> GraphStoreResult<(PostingEntry, GraphPayload)> {
         let mut fields = BTreeMap::new();
         fields.insert(
             first.source_var.clone(),
@@ -341,35 +364,28 @@ impl<'a> GMatch<'a> {
             second.target_var.clone(),
             graph_id_value(second_edge.target_id, "GMatch target")?,
         );
-        entries.push(PostingEntry::new(
+        let entry = PostingEntry::new(
             doc_id,
             Payload {
                 positions: Vec::new(),
                 score: self.score,
                 fields,
             },
-        ));
+        );
 
-        let mut subgraph_edges = vec![first_edge.edge_id, second_edge.edge_id];
-        subgraph_edges.sort_unstable();
-        subgraph_edges.dedup();
-        let mut subgraph_vertices = vec![
-            first_edge.source_id,
-            first_edge.target_id,
-            second_edge.target_id,
-        ];
-        subgraph_vertices.sort_unstable();
-        subgraph_vertices.dedup();
-        graph_payloads.insert(
-            doc_id,
+        Ok((
+            entry,
             GraphPayload {
-                subgraph_vertices,
-                subgraph_edges,
-                graph_name: self.graph.to_string(),
+                subgraph_vertices: sorted_match_ids([
+                    first_edge.source_id,
+                    first_edge.target_id,
+                    second_edge.target_id,
+                ]),
+                subgraph_edges: sorted_match_ids([first_edge.edge_id, second_edge.edge_id]),
+                graph_name: Arc::clone(graph_name),
                 score_override: Some(self.score),
             },
-        );
-        Ok(())
+        ))
     }
 
     fn edge_list_for_pattern<G: GraphStore>(
@@ -638,3 +654,50 @@ impl<'a> GMatch<'a> {
 // -------------------------------------------------------------------------
 // VertexAggregation
 // -------------------------------------------------------------------------
+
+fn endpoint_matches<G: GraphStore>(
+    store: &G,
+    edge: EdgeId,
+    vertex: VertexId,
+    position: &str,
+    pattern: &crate::pattern::VertexPattern,
+) -> GraphStoreResult<bool> {
+    let endpoint = store.get_vertex(vertex)?.ok_or_else(|| {
+        GraphStoreError::CorruptGraph(format!(
+            "edge {edge} references missing {position} vertex {vertex}"
+        ))
+    })?;
+    Ok(pattern.satisfies(&endpoint))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_edge_match_allocates_only_surviving_payload_buffers() {
+        let operator = GMatch::new(GraphPattern::new(), "g");
+        let first = EdgePattern::new("a", "b");
+        let second = EdgePattern::new("b", "c");
+        let forward = Edge::new(8, 9, 3, "edge");
+        let back = Edge::new(4, 3, 9, "edge");
+        let name: Arc<str> = Arc::from("g");
+        let mut result = None;
+        let allocated = allocation_counter::measure(|| {
+            result = Some(
+                operator
+                    .two_edge_path_match(&first, &second, &forward, &back, 1, &name)
+                    .unwrap(),
+            );
+        });
+        assert_eq!(
+            i64::try_from(allocated.count_total).unwrap(),
+            allocated.count_current
+        );
+        let (_, payload) = result.unwrap();
+        assert_eq!(&*payload.subgraph_vertices, &[3, 9]);
+        assert_eq!(&*payload.subgraph_edges, &[4, 8]);
+        assert!(Arc::ptr_eq(&payload.graph_name, &name));
+        assert_eq!(&*sorted_match_ids([8, 8]), &[8]);
+    }
+}

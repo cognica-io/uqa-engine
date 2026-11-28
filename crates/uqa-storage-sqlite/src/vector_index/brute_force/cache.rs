@@ -8,32 +8,76 @@
 
 use super::{BudgetedVec, DocId, NativeVectorRead, SQLiteError, SQLiteResult, SQLiteVectorIndex};
 use crate::mvcc::native::NativeRecordFamily as Family;
-use crate::vector_index::native::{
-    identity::{identity, VectorIdentity},
-    VectorBuffer,
+use crate::vector_index::native::identity::{identity, VectorIdentity};
+use uqa_core::memory::{Budgeted, MemoryBudget, MemoryError};
+use uqa_storage::{
+    vector_index::{cosine_similarity_with_norms, vector_norm},
+    ReadOnlySnapshot, StorageBackendError,
 };
-use uqa_core::memory::MemoryError;
-use uqa_storage::{ReadOnlySnapshot, StorageBackendError};
 
-type Coordinates = Vec<(DocId, Vec<f32>)>;
+struct Coordinates {
+    rows: Vec<(DocId, f32)>,
+    values: Vec<f32>,
+}
+
+struct PendingCoordinates {
+    rows: BudgetedVec<(DocId, f32)>,
+    values: BudgetedVec<f32>,
+}
+
+impl PendingCoordinates {
+    fn new(memory: &MemoryBudget) -> Self {
+        Self {
+            rows: BudgetedVec::new(memory),
+            values: BudgetedVec::new(memory),
+        }
+    }
+
+    fn append(
+        &mut self,
+        id: DocId,
+        norm: f32,
+        values: &[f32],
+        limit: usize,
+    ) -> Result<(), MemoryError> {
+        let rows = self.rows.len().saturating_add(1);
+        let floats = self.values.len().saturating_add(values.len());
+        let required = Self::bytes(rows, floats);
+        if required > limit {
+            return Err(MemoryError::Limit { required, limit });
+        }
+        self.rows.reserve(1)?;
+        self.values.extend_from_slice(values)?;
+        self.rows.push((id, norm))
+    }
+
+    fn bytes(rows: usize, floats: usize) -> usize {
+        rows.saturating_mul(size_of::<(DocId, f32)>())
+            .saturating_add(floats.saturating_mul(size_of::<f32>()))
+            .saturating_add(size_of::<Coordinates>())
+            .saturating_add(size_of::<uqa_core::memory::MemoryReservation>())
+    }
+
+    fn finish(
+        mut self,
+        cache: &MemoryBudget,
+    ) -> Result<ReadOnlySnapshot<Coordinates>, StorageBackendError> {
+        // Replacement buffers belong to query workspace. Only the immutable buffers and their shared handle survive in the cache.
+        if Self::bytes(self.rows.capacity(), self.values.capacity()) > cache.limit() {
+            self.rows.shrink_to_fit()?;
+            self.values.shrink_to_fit()?;
+        }
+        let (rows, mut memory) = self.rows.into_parts();
+        let (values, coordinates) = self.values.into_parts();
+        memory.absorb(coordinates);
+        memory.restrict_to_child(cache)?;
+        ReadOnlySnapshot::from_budgeted(Budgeted::new(Coordinates { rows, values }, memory))
+    }
+}
 
 pub(super) struct CachedVectors {
     identity: VectorIdentity,
     coordinates: ReadOnlySnapshot<Coordinates>,
-}
-
-fn append(
-    buffer: &mut VectorBuffer<(DocId, Vec<f32>)>,
-    id: DocId,
-    values: &[f32],
-) -> Result<(), MemoryError> {
-    buffer.rows.reserve(1)?;
-    let mut vector = BudgetedVec::new(buffer.rows.budget());
-    vector.extend_from_slice(values)?;
-    let (vector, memory) = vector.into_parts();
-    buffer.rows.push((id, vector))?;
-    buffer.payload.absorb(memory);
-    Ok(())
 }
 
 impl SQLiteVectorIndex {
@@ -69,6 +113,7 @@ impl SQLiteVectorIndex {
             self.cached_vectors.write().take();
             return Self::score_stream(query, threshold, |visit| read.visit_vectors(visit));
         };
+        let query_norm = vector_norm(query);
         let cached = self
             .cached_vectors
             .read()
@@ -76,10 +121,17 @@ impl SQLiteVectorIndex {
             .filter(|cached| cached.identity == identity)
             .map(|cached| cached.coordinates.clone());
         if let Some(cached) = cached {
-            let result = Self::score_stream(query, threshold, |visit| {
-                for (id, vector) in cached.iter() {
+            let result = Self::collect_scores(threshold, |emit| {
+                let mut values = &cached.values[..];
+                for &(id, norm) in &cached.rows {
                     read.snapshot.control.check()?;
-                    visit(*id, vector, &read.snapshot.control)?;
+                    let (vector, rest) = values.split_at(self.dimensions as usize);
+                    values = rest;
+                    emit(
+                        id,
+                        cosine_similarity_with_norms(query, vector, query_norm, norm),
+                        &read.snapshot.control,
+                    )?;
                 }
                 read.snapshot.control.check()?;
                 Ok(())
@@ -95,14 +147,20 @@ impl SQLiteVectorIndex {
         self.cached_vectors.write().take();
         let memory = read.snapshot.control.memory();
         let cache_memory = memory.child((memory.limit() / 16).min(16 * 1024 * 1024));
-        let mut pending = Some(VectorBuffer::with_memory(&cache_memory));
-        let result = Self::score_stream(query, threshold, |visit| {
+        let mut pending = Some(PendingCoordinates::new(memory));
+        let result = Self::collect_scores(threshold, |emit| {
             read.visit_vectors(|id, vector, control| {
-                visit(id, vector, control)?;
-                if pending
-                    .as_mut()
-                    .is_some_and(|buffer| append(buffer, id, vector).is_err())
-                {
+                let norm = vector_norm(vector);
+                emit(
+                    id,
+                    cosine_similarity_with_norms(query, vector, query_norm, norm),
+                    control,
+                )?;
+                if pending.as_mut().is_some_and(|buffer| {
+                    buffer
+                        .append(id, norm, vector, cache_memory.limit())
+                        .is_err()
+                }) {
                     pending = None;
                 }
                 Ok(())
@@ -116,7 +174,7 @@ impl SQLiteVectorIndex {
         let scores = result?;
         if let Some(pending) = pending {
             read.snapshot.control.check()?;
-            match ReadOnlySnapshot::from_budgeted(pending.finish()) {
+            match pending.finish(&cache_memory) {
                 Ok(coordinates) => {
                     *self.cached_vectors.write() = Some(CachedVectors {
                         identity,

@@ -4,10 +4,10 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Mutating Cypher executor: extends the read-only [`CypherExecutor`]
+//! Mutating Cypher executor: extends the read-only [`CypherExecutor`](crate::cypher::executor::CypherExecutor)
 //! pipeline with `CREATE`, `SET`, `MERGE`, `DELETE` / `DETACH DELETE`,
 //! and `UNWIND` clauses. Reads delegate to a transient
-//! [`CypherExecutor`] view that borrows the store immutably.
+//! [`CypherExecutor`](crate::cypher::executor::CypherExecutor) view that borrows the store immutably.
 
 use std::collections::BTreeMap;
 
@@ -18,7 +18,9 @@ use crate::cypher::ast::{
     PathElement, PathPattern, PropertyAccess, RelDirection, RelPattern, SetClause, SetItem,
     SetOperator, Variable,
 };
-use crate::cypher::executor::{Binding, BindingRow, CypherError, CypherExecutor, ResultRow};
+use crate::cypher::executor::{
+    Binding, BindingRow, CypherError, PatternCache, ResultRow, StatementReader,
+};
 use crate::store::GraphStore;
 
 /// Mutating Cypher executor. Holds a unique borrow of the graph store
@@ -44,13 +46,33 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         self
     }
 
-    fn reader(&self) -> CypherExecutor<'_, G> {
-        let mut exec = CypherExecutor::new(&*self.store, &self.graph);
-        exec.params = self.params.clone();
-        exec
+    pub fn execute(
+        &mut self,
+        query: &CypherQuery,
+    ) -> Result<(Vec<String>, Vec<ResultRow>), CypherError> {
+        WriteStatement {
+            store: self.store,
+            graph: &self.graph,
+            params: &self.params,
+            patterns: PatternCache::default(),
+        }
+        .execute(query)
+    }
+}
+
+struct WriteStatement<'a, G: GraphStore> {
+    store: &'a mut G,
+    graph: &'a str,
+    params: &'a BTreeMap<String, Value>,
+    patterns: PatternCache,
+}
+
+impl<G: GraphStore> WriteStatement<'_, G> {
+    fn reader(&self) -> StatementReader<'_, G> {
+        StatementReader::new(&*self.store, self.graph, self.params, &self.patterns)
     }
 
-    pub fn execute(
+    fn execute(
         &mut self,
         query: &CypherQuery,
     ) -> Result<(Vec<String>, Vec<ResultRow>), CypherError> {
@@ -94,9 +116,8 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                                 continue;
                             }
                         }
-                        next.push(CypherExecutor::<G>::row_to_bindings(&cols, &row));
+                        next.push(StatementReader::<G>::row_to_bindings(&cols, &row));
                     }
-                    drop(reader);
                     bindings = next;
                 }
                 CypherClause::Return(r) => {
@@ -212,14 +233,14 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         // AGE graphid allocation: (label_id << 48) | per-label sequence.
         let vid = self
             .store
-            .allocate_vertex_id(&label, &self.graph)
+            .allocate_vertex_id(&label, self.graph)
             .map_err(CypherError::from)?;
         let vertex = Vertex {
             vertex_id: vid,
             label,
             properties: props,
         };
-        self.store.add_vertex(vertex.clone(), &self.graph)?;
+        self.store.add_vertex(vertex.clone(), self.graph)?;
         Ok(vertex)
     }
 
@@ -244,7 +265,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         // AGE graphid allocation: (label_id << 48) | per-label sequence.
         let eid = self
             .store
-            .allocate_edge_id(&label, &self.graph)
+            .allocate_edge_id(&label, self.graph)
             .map_err(CypherError::from)?;
         let edge = Edge {
             edge_id: eid,
@@ -253,7 +274,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
             label,
             properties: props,
         };
-        self.store.add_edge(edge.clone(), &self.graph)?;
+        self.store.add_edge(edge.clone(), self.graph)?;
         Ok(edge)
     }
 
@@ -292,7 +313,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                             label: vertex.label.clone(),
                             properties: new_props,
                         };
-                        self.store.add_vertex(updated.clone(), &self.graph)?;
+                        self.store.add_vertex(updated.clone(), self.graph)?;
                         row.insert(variable.clone(), Binding::Vertex(updated));
                     }
                     Binding::Edge(edge) => {
@@ -305,7 +326,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                             label: edge.label.clone(),
                             properties: new_props,
                         };
-                        self.store.add_edge(updated.clone(), &self.graph)?;
+                        self.store.add_edge(updated.clone(), self.graph)?;
                         row.insert(variable.clone(), Binding::Edge(updated));
                     }
                     _ => {
@@ -336,7 +357,7 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
                         label: vertex.label.clone(),
                         properties: new_props,
                     };
-                    self.store.add_vertex(updated.clone(), &self.graph)?;
+                    self.store.add_vertex(updated.clone(), self.graph)?;
                     row.insert(name.clone(), Binding::Vertex(updated));
                 } else {
                     return Err(CypherError::TypeError(format!(
@@ -387,21 +408,21 @@ impl<'a, G: GraphStore> CypherWriter<'a, G> {
         to_delete_edges.sort_unstable();
         to_delete_edges.dedup();
         for eid in &to_delete_edges {
-            self.store.remove_edge(*eid, &self.graph)?;
+            self.store.remove_edge(*eid, self.graph)?;
         }
         to_delete_vertices.sort_unstable();
         to_delete_vertices.dedup();
         for vid in &to_delete_vertices {
             if !clause.detach {
-                let has_out = !self.store.out_edge_ids(*vid, &self.graph)?.is_empty();
-                let has_in = !self.store.in_edge_ids(*vid, &self.graph)?.is_empty();
+                let has_out = !self.store.out_edge_ids(*vid, self.graph)?.is_empty();
+                let has_in = !self.store.in_edge_ids(*vid, self.graph)?.is_empty();
                 if has_out || has_in {
                     return Err(CypherError::TypeError(format!(
                         "cannot delete vertex {vid}: has incident edges, use DETACH DELETE"
                     )));
                 }
             }
-            self.store.remove_vertex(*vid, &self.graph)?;
+            self.store.remove_vertex(*vid, self.graph)?;
         }
         Ok(bindings)
     }

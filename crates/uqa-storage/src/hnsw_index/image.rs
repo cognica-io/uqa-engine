@@ -11,7 +11,7 @@ use super::{
     MAX_HNSW_LEVEL,
 };
 use crate::{
-    image_io::{ImageOutput, ImageRead, ImageReader},
+    image_io::{write_from_cursor, ImageRead, ImageReader},
     read_control::StorageReadControl,
     vector_index::image::{invalid, read_floats, Input},
     StorageBackendResult,
@@ -37,23 +37,8 @@ pub(super) fn write(
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    let mut cursor = stream::HNSWImageCursor::new(index, control)?;
-    while !cursor.prepare(128)?.ready {}
-    let mut out = ImageOutput {
-        writer,
-        control,
-        written: 0,
-    };
-    let mut buffer = [0; 4096];
-    loop {
-        let count = cursor.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        out.bytes(&buffer[..count])?;
-    }
-    control.check()?;
-    Ok(out.written)
+    let cursor = stream::HNSWImageCursor::new(index, control)?;
+    write_from_cursor(cursor, writer, control, None)
 }
 
 async fn flag(input: &mut Input<'_, '_>) -> StorageBackendResult<bool> {

@@ -10,9 +10,15 @@ use rusqlite::types::ValueRef;
 use uqa_core::{memory::BudgetedVec, DocId, Value};
 use uqa_storage::{document_store::decoding::ProjectedDocumentFields, mvcc::VersionError};
 
-use super::positional::{has_external_values, Projected};
+use super::positional::has_external_values;
 use super::{sqlite_doc_id, Family, NativeDocumentRead, SQLiteResult};
 use crate::mvcc::native::{decode_record, NativeRecordIdentity, NativeRecordOwner};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum PointAccess {
+    Borrowed,
+    Reentrant,
+}
 
 impl NativeDocumentRead<'_> {
     pub(in crate::document_store) fn visit_borrowed_points(
@@ -21,19 +27,40 @@ impl NativeDocumentRead<'_> {
         fields: &[&str],
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<usize> {
+        self.visit_points(ids, fields, PointAccess::Borrowed, visitor)
+    }
+
+    pub(super) fn visit_points(
+        &self,
+        ids: &[DocId],
+        fields: &[&str],
+        access: PointAccess,
+        visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
+    ) -> SQLiteResult<usize> {
         self.snapshot.control.check()?;
         self.control.check()?;
+        let mut slots = BudgetedVec::new(self.control.memory());
         let Some(owner) = self.owner else {
             let mut visited = 0;
-            self.visit_projection(ids, fields, &mut |id, present, values| {
+            for id in ids {
+                self.snapshot.control.check()?;
+                self.control.check()?;
+                sqlite_doc_id(*id)?;
                 visited += 1;
-                visitor(id, present, values)
-            })?;
+                if !self.visit_point_fields(*id, None, fields, &mut slots, visitor)? {
+                    break;
+                }
+            }
             return Ok(visited);
         };
-        let (mut visited, finished) = self.visit_latest_points(owner, ids, fields, visitor)?;
-        if finished {
-            return Ok(visited);
+        let mut visited = 0;
+        if access == PointAccess::Borrowed {
+            let (count, finished) =
+                self.visit_latest_points(owner, ids, fields, &mut slots, visitor)?;
+            if finished {
+                return Ok(count);
+            }
+            visited = count;
         }
         let identity = NativeRecordIdentity::new(Family::Documents, owner)?;
         let mut keys = ids[visited..].iter().map(|id| {
@@ -42,7 +69,7 @@ impl NativeDocumentRead<'_> {
         });
         let mut selected = self.snapshot.view.selected(self.control);
         while visited < ids.len() {
-            let mut pending: Option<Projected> = None;
+            let mut pending = None;
             selected.visit_values(&mut keys, self.control, &mut |key, record| {
                 self.snapshot.control.check()?;
                 self.control.check()?;
@@ -56,23 +83,24 @@ impl NativeDocumentRead<'_> {
                 } else {
                     None
                 };
-                if row.as_ref().is_some_and(|row| has_external_values(row)) {
-                    pending = row;
+                if access == PointAccess::Reentrant
+                    || row.as_deref().is_some_and(has_external_values)
+                {
+                    pending = Some((id, row));
                     return Ok(false);
                 }
                 let more = self
-                    .visit_point_fields(id, row.as_deref(), fields, visitor)
+                    .visit_point_fields(id, row.as_deref(), fields, &mut slots, visitor)
                     .map_err(|error| VersionError::Storage(error.into()))?;
                 visited += 1;
                 Ok(more)
             })?;
-            let Some(row) = pending else {
-                break;
-            };
-            // Release the physical read window before resolving compound BLOB records on the same immutable view.
-            let id = ids[visited];
-            let row = self.hydrate_positional(id, row, fields)?;
-            let more = self.visit_point_fields(id, Some(&row), fields, visitor)?;
+            let Some((id, row)) = pending else { break };
+            // Release the physical window for BLOB hydration and for callbacks that may reenter the same database.
+            let row = row
+                .map(|row| self.hydrate_positional(id, row, fields))
+                .transpose()?;
+            let more = self.visit_point_fields(id, row.as_deref(), fields, &mut slots, visitor)?;
             visited += 1;
             if !more {
                 break;
@@ -89,6 +117,7 @@ impl NativeDocumentRead<'_> {
         owner: NativeRecordOwner,
         ids: &[DocId],
         fields: &[&str],
+        slots: &mut BudgetedVec<&'static Value>,
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<(usize, bool)> {
         if ids.len() < 8
@@ -121,8 +150,13 @@ impl NativeDocumentRead<'_> {
                                 pending = row;
                                 return Ok(false);
                             }
-                            let more =
-                                self.visit_point_fields(id, row.as_deref(), fields, visitor)?;
+                            let more = self.visit_point_fields(
+                                id,
+                                row.as_deref(),
+                                fields,
+                                slots,
+                                visitor,
+                            )?;
                             visited += 1;
                             Ok(more)
                         },
@@ -138,7 +172,7 @@ impl NativeDocumentRead<'_> {
             // BLOB hydration releases the physical cursor. Recheck the snapshot boundary before the next segment.
             let id = ids[visited];
             let row = self.hydrate_positional(id, row, fields)?;
-            let more = self.visit_point_fields(id, Some(&row), fields, visitor)?;
+            let more = self.visit_point_fields(id, Some(&row), fields, slots, visitor)?;
             visited += 1;
             if !more {
                 break;
@@ -152,11 +186,12 @@ impl NativeDocumentRead<'_> {
         id: DocId,
         row: Option<&ProjectedDocumentFields>,
         fields: &[&str],
+        slots: &mut BudgetedVec<&'static Value>,
         visitor: &mut dyn FnMut(DocId, bool, &[&Value]) -> bool,
     ) -> SQLiteResult<bool> {
         self.snapshot.control.check()?;
         self.control.check()?;
-        let mut projected = BudgetedVec::new(self.control.memory());
+        let mut projected = std::mem::replace(slots, BudgetedVec::new(self.control.memory()));
         projected.reserve(fields.len())?;
         for position in 0..fields.len() {
             projected.push(
@@ -165,6 +200,7 @@ impl NativeDocumentRead<'_> {
             )?;
         }
         let more = visitor(id, row.is_some(), &projected);
+        *slots = projected.clear_references();
         self.snapshot.control.check()?;
         self.control.check()?;
         Ok(more)

@@ -7,11 +7,11 @@
 //! Share node scans across independent input bindings without retaining a graph payload cache.
 
 use super::{
-    agtype, pattern_variables, BTreeSet, Binding, BindingRow, CypherError, CypherExecutor,
-    CypherExpr, GraphStore, MatchClause, PathElement, Value,
+    agtype, pattern_variables, BTreeSet, Binding, BindingRow, CypherError, CypherExpr, GraphStore,
+    MatchClause, PathElement, StatementReader, Value,
 };
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(super) fn try_node_match_batch(
         &self,
         clause: &MatchClause,
@@ -57,10 +57,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
             self.for_each_node_vertex(node, &candidates, |vertex| {
                 for (index, seed) in seeds.iter().enumerate() {
                     if self.node_matches(node, vertex, seed)? {
-                        // The ordinary matcher validates the agtype graph ID even without a path variable.
-                        if i64::try_from(vertex.vertex_id).is_err() {
-                            agtype::vertex_to_value(vertex)?;
-                        }
+                        agtype::graph_id(vertex.vertex_id)?;
                         let mut row = (*seed).clone();
                         if let Some(variable) = &node.variable {
                             row.insert(variable.clone(), Binding::Vertex(vertex.clone()));

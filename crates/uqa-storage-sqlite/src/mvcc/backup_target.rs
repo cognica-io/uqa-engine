@@ -12,24 +12,18 @@ use crate::{
     SQLiteKeyValueBackupImport, SQLiteKeyValueStorage, SQLiteNativeBackupImport,
     SQLiteStorageProvider,
 };
-use std::{
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::Path, sync::Arc};
 use uqa_core::memory::Budgeted;
 use uqa_storage::{
     backup::{
-        BackupError, BackupImageImportStep, BackupImageValidationStep, BackupImageValidator,
-        BackupImportLimits, BackupLease, BackupRestoreWorkStep, BackupResult, BackupRoot,
-        ImageProvider, OwnedBackupImageValidation, OwnedPersistentBackupImport,
-        PersistentBackupImport, PersistentBackupTarget, RestoreDirectory, RestoreFileWork,
+        restored_database_path, BackupError, BackupFileInput, BackupImageImportStep,
+        BackupImportLimits, BackupLease, BackupResult, BackupRoot, ImageProvider,
+        OwnedPersistentBackupImport, PersistentBackupTarget, RestoreDirectory,
     },
     mvcc::{DatabaseRestore, VersionedSessionOptions},
     read_control::StorageReadControl,
     PersistentStorageProvider, StorageEncryptionKey,
 };
-
-const DATABASE: &str = "database";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SQLiteBackupMapping {
@@ -127,15 +121,17 @@ impl SQLiteBackupTarget {
                 "SQLite restore destination mapping",
             ));
         }
-        OwnedPersistentBackupImport::create(control, || {
-            if !recover {
-                drop(directory.create_file(DATABASE)?);
-            }
-            let work = directory.begin_file_work(DATABASE, control, |path| {
-                let state = if recover {
+        let target = self.clone();
+        OwnedPersistentBackupImport::from_file(
+            directory,
+            recover,
+            control,
+            |file, path| {
+                let state = if file.is_none() {
                     let memory = control.memory().reserve(size_of::<Recovery>())?;
                     State::Recover(Budgeted::new(
                         Box::new(Recovery {
+                            mapping: self.mapping,
                             root: backup.root(),
                             request,
                             options: self.options(limits),
@@ -143,6 +139,7 @@ impl SQLiteBackupTarget {
                         memory,
                     ))
                 } else {
+                    drop(file);
                     match self.mapping {
                         SQLiteBackupMapping::Native => {
                             let memory = control
@@ -172,15 +169,10 @@ impl SQLiteBackupTarget {
                         }
                     }
                 };
-                Ok(Import {
-                    target: self.clone(),
-                    state,
-                    request,
-                    control: control.clone(),
-                })
-            })?;
-            Ok(PinnedImport(work))
-        })
+                Ok(state)
+            },
+            move |path, control| target.open_file(path, request, control),
+        )
     }
 }
 
@@ -220,20 +212,13 @@ impl PersistentBackupTarget for SQLiteBackupTarget {
         request: DatabaseRestore,
         control: &StorageReadControl,
     ) -> BackupResult<Arc<dyn PersistentStorageProvider>> {
-        let capacity = directory
-            .as_os_str()
-            .len()
-            .checked_add(DATABASE.len() + 1)
-            .ok_or(BackupError::Invalid("restore pathname length"))?;
-        let _memory = control.memory().reserve(capacity)?;
-        let mut path = PathBuf::with_capacity(capacity);
-        path.push(directory);
-        path.push(DATABASE);
+        let path = restored_database_path(directory, control)?;
         self.open_file(&path, request, control)
     }
 }
 
 struct Recovery {
+    mapping: SQLiteBackupMapping,
     root: BackupRoot,
     request: DatabaseRestore,
     options: SQLiteBackupImportOptions,
@@ -243,111 +228,41 @@ enum State<'a> {
     Native(Budgeted<Box<SQLiteNativeBackupImport<'a>>>),
     KeyValue(Budgeted<Box<SQLiteKeyValueBackupImport<'a>>>),
     Recover(Budgeted<Box<Recovery>>),
-    Imported,
-    Validating(OwnedBackupImageValidation),
-    Failed,
 }
 
-struct Import<'a> {
-    target: SQLiteBackupTarget,
-    state: State<'a>,
-    request: DatabaseRestore,
-    control: StorageReadControl,
-}
-
-struct PinnedImport<'a>(RestoreFileWork<Import<'a>>);
-
-impl PersistentBackupImport for PinnedImport<'_> {
-    fn advance(&mut self, maximum_object_bytes: usize) -> BackupResult<BackupImageImportStep> {
-        let mut result = BackupImageImportStep::Pending;
-        self.0.advance_with(|input, path| {
-            input.control.check()?;
-            let state = std::mem::replace(&mut input.state, State::Failed);
-            input.state = match state {
-                State::Native(mut import) => {
-                    if import.as_mut().advance_with_window(maximum_object_bytes)?
-                        == SQLiteBackupImportStep::Complete
-                    {
-                        State::Imported
-                    } else {
-                        State::Native(import)
-                    }
-                }
-                State::KeyValue(mut import) => {
-                    if import.as_mut().advance_with_window(maximum_object_bytes)?
-                        == SQLiteBackupImportStep::Complete
-                    {
-                        State::Imported
-                    } else {
-                        State::KeyValue(import)
-                    }
-                }
-                State::Recover(recovery) => {
-                    match input.target.mapping {
-                        SQLiteBackupMapping::Native => SQLiteNativeBackupImport::recover(
-                            path,
-                            recovery.root,
-                            recovery.request,
-                            recovery.options.clone(),
-                            &input.control,
-                        )?,
-                        SQLiteBackupMapping::KeyValue => SQLiteKeyValueBackupImport::recover(
-                            path,
-                            recovery.root,
-                            recovery.request,
-                            recovery.options.clone(),
-                            &input.control,
-                        )?,
-                    }
-                    State::Imported
-                }
-                State::Imported => State::Imported,
-                State::Validating(_) => {
-                    return Err(BackupError::Invalid("logical image validation is active"))
-                }
-                State::Failed => return Err(BackupError::Finished),
-            };
-            if matches!(input.state, State::Imported) {
-                result = BackupImageImportStep::Imported;
-            }
-            Ok(BackupRestoreWorkStep::Pending)
-        })?;
-        Ok(result)
-    }
-
-    fn validate(&mut self, validator: &mut dyn BackupImageValidator) -> BackupResult<()> {
-        while self.advance_validation(validator, 64)? == BackupImageValidationStep::Pending {}
-        Ok(())
-    }
-
-    fn advance_validation(
+impl BackupFileInput for State<'_> {
+    fn advance(
         &mut self,
-        validator: &mut dyn BackupImageValidator,
-        maximum_steps: usize,
-    ) -> BackupResult<BackupImageValidationStep> {
-        let step = self.0.advance_with(|input, path| {
-            let state = std::mem::replace(&mut input.state, State::Failed);
-            let mut validation = match state {
-                State::Imported => {
-                    let provider = input
-                        .target
-                        .open_file(path, input.request, &input.control)?;
-                    validator.begin(provider, &input.control)?
+        path: &Path,
+        maximum_object_bytes: usize,
+        control: &StorageReadControl,
+    ) -> BackupResult<BackupImageImportStep> {
+        let step = match self {
+            Self::Native(import) => import.as_mut().advance_with_window(maximum_object_bytes)?,
+            Self::KeyValue(import) => import.as_mut().advance_with_window(maximum_object_bytes)?,
+            Self::Recover(recovery) => {
+                match recovery.mapping {
+                    SQLiteBackupMapping::Native => SQLiteNativeBackupImport::recover(
+                        path,
+                        recovery.root,
+                        recovery.request,
+                        recovery.options.clone(),
+                        control,
+                    )?,
+                    SQLiteBackupMapping::KeyValue => SQLiteKeyValueBackupImport::recover(
+                        path,
+                        recovery.root,
+                        recovery.request,
+                        recovery.options.clone(),
+                        control,
+                    )?,
                 }
-                State::Validating(validation) => validation,
-                _ => return Err(BackupError::Invalid("SQLite image import is incomplete")),
-            };
-            match validation.advance(maximum_steps)? {
-                BackupImageValidationStep::Pending => {
-                    input.state = State::Validating(validation);
-                    Ok(BackupRestoreWorkStep::Pending)
-                }
-                BackupImageValidationStep::Complete => Ok(BackupRestoreWorkStep::Complete),
+                SQLiteBackupImportStep::Complete
             }
-        })?;
+        };
         Ok(match step {
-            BackupRestoreWorkStep::Pending => BackupImageValidationStep::Pending,
-            BackupRestoreWorkStep::Complete => BackupImageValidationStep::Complete,
+            SQLiteBackupImportStep::Pending => BackupImageImportStep::Pending,
+            SQLiteBackupImportStep::Complete => BackupImageImportStep::Imported,
         })
     }
 }
@@ -434,7 +349,7 @@ mod tests {
                 target.encryption_key =
                     (mode % 2 == 1).then(|| StorageEncryptionKey::new("test secret"));
                 assert!(target.open(directory.path(), request, &control).is_err());
-                assert!(!directory.path().join(DATABASE).exists());
+                assert!(!directory.path().join("database").exists());
                 assert_eq!(control.memory().used(), 0);
             }
         }

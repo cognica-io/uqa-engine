@@ -114,14 +114,26 @@ pub fn decode_vector_bytes(
     }
     let mut vector = BudgetedVec::new(control.memory());
     vector.reserve(bytes.len() / 4)?;
+    decode_vector_coordinates(bytes, dimensions, &mut vector, control, || control.check())?;
+    Ok(vector)
+}
+
+/// Decode a width-checked little-endian vector into the caller's charged scratch buffer.
+pub(crate) fn decode_vector_coordinates(
+    bytes: &[u8],
+    dimensions: u32,
+    vector: &mut BudgetedVec<f32>,
+    control: &StorageReadControl,
+    check: impl Fn() -> StorageBackendResult<()>,
+) -> StorageBackendResult<()> {
+    vector.clear();
     for (position, bytes) in bytes.as_chunks::<4>().0.iter().enumerate() {
         if position.is_multiple_of(1024) {
-            control.check()?;
+            check()?;
         }
         vector.push(f32::from_le_bytes(*bytes))?;
     }
-    super::validate_vector_values_controlled(dimensions, &vector, Some(control))?;
-    Ok(vector)
+    super::validate_vector_values_controlled(dimensions, vector, Some(control))
 }
 
 impl<T: VectorRead> VectorRead for Budgeted<T> {

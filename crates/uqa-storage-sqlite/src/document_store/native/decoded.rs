@@ -14,13 +14,12 @@ use uqa_core::{
 };
 use uqa_storage::{
     document_store::{decoding::decode_legacy_document_text_fields_budgeted, Document},
-    mvcc::{SelectedRecordRead, VersionError},
     DocumentMetadata, RetainedDocumentFields, RetainedStoredDocument,
 };
 
 use super::NativeDocumentRead;
 use crate::document_store::{controlled, sqlite_doc_id, DocId, SQLiteError, SQLiteResult};
-use crate::mvcc::native::{decode_record, NativeRecordFamily as Family, NativeRecordIdentity};
+use crate::mvcc::native::{NativeRecordFamily as Family, NativeRecordIdentity};
 
 mod borrowed;
 mod points;
@@ -99,36 +98,6 @@ impl NativeDocumentRead<'_> {
             return Ok(None);
         };
         self.hydrate_decoded(id, row, projection).map(Some)
-    }
-
-    fn projected(
-        &self,
-        selected: &mut SelectedRecordRead<'_>,
-        id: DocId,
-        fields: &[&str],
-    ) -> SQLiteResult<Option<positional::Projected>> {
-        let Some(key) = self.selection_key(id)? else {
-            return Ok(None);
-        };
-        self.snapshot.control.check()?;
-        self.control.check()?;
-        let mut row = None;
-        selected.visit_value(&key, self.control, &mut |record| {
-            self.snapshot.control.check()?;
-            self.control.check()?;
-            if let Some(bytes) = record.and_then(|record| record.value) {
-                let (_, values) = decode_record(&key, bytes, self.control)?;
-                row = Some(
-                    self.decode_positional_body(id, &values, fields)
-                        .map_err(|error| VersionError::Storage(error.into()))?,
-                );
-            }
-            self.control.check()?;
-            self.snapshot.control.check()?;
-            Ok(())
-        })?;
-        row.map(|row| self.hydrate_positional(id, row, fields))
-            .transpose()
     }
 
     fn selection_key(&self, id: DocId) -> SQLiteResult<Option<BudgetedVec<u8>>> {
@@ -226,30 +195,7 @@ impl NativeDocumentRead<'_> {
         if fields.is_empty() {
             return self.visit_presence(ids, visitor);
         }
-        let mut selected = self.snapshot.view.selected(self.control);
-        for id in ids {
-            self.snapshot.control.check()?;
-            self.control.check()?;
-            let document = self.projected(&mut selected, *id, fields)?;
-            let present = document.is_some();
-            let mut projected = BudgetedVec::new(self.control.memory());
-            projected.reserve(fields.len())?;
-            for position in 0..fields.len() {
-                projected.push(
-                    document
-                        .as_ref()
-                        .and_then(|row| row.get(position))
-                        .unwrap_or(&Value::Null),
-                )?;
-            }
-            // Native row visitors have returned, so the callback can safely reenter persistence while this immutable snapshot and its decoded row stay alive.
-            let keep_going = visitor(*id, present, &projected);
-            self.snapshot.control.check()?;
-            self.control.check()?;
-            if !keep_going {
-                break;
-            }
-        }
+        self.visit_points(ids, fields, points::PointAccess::Reentrant, visitor)?;
         Ok(())
     }
 }

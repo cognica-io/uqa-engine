@@ -28,6 +28,22 @@ use crate::read_control::{copy_bytes, payload_length, prefix_upper_bound, reserv
 
 use super::{codec, runs, PhysicalResult, SQLiteRecordStore};
 
+#[cfg(test)]
+fn history_test_connection() -> Connection {
+    let connection = Connection::open_in_memory().unwrap();
+    super::connection_functions::ConnectionFunctions::of(&connection).unwrap();
+    connection.execute_batch(
+        "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
+         CREATE TABLE _uqa_mvcc_versions (key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY);
+         CREATE TABLE _uqa_mvcc_runs (unused INTEGER);"
+    ).unwrap();
+    connection
+        .execute_batch(super::version_metadata::TABLE.1)
+        .unwrap();
+    super::version_metadata::create_triggers(&connection).unwrap();
+    connection
+}
+
 pub(super) struct Snapshot {
     pub(super) store: SQLiteRecordStore,
     pub(super) sequence: CommitSequence,
@@ -42,17 +58,19 @@ pub(super) struct Snapshot {
 impl Snapshot {
     fn read<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
-        self.store.read(operation)
+        self.store.read(control, operation)
     }
 
     /// Run `operation` in one physical read when this snapshot's boundary is the database's latest commit, so the native projections, which each commit materializes in its own transaction, hold exactly this snapshot's committed records. Returns `None` when a newer commit exists.
     pub(super) fn read_latest<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
     ) -> VersionResult<Option<T>> {
-        self.read(|connection| {
+        self.read(control, |connection| {
             if codec::header(connection, self.store.identity)?.sequence != self.sequence {
                 return Ok(None);
             }
@@ -64,9 +82,10 @@ impl Snapshot {
     /// The caller must reconcile changes newer than this snapshot's boundary.
     pub(super) fn read_historical<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<Option<T>>,
     ) -> VersionResult<Option<T>> {
-        self.read(|connection| {
+        self.read(control, |connection| {
             if codec::header(connection, self.store.identity)?.sequence <= self.sequence {
                 return Ok(None);
             }
@@ -84,7 +103,9 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<uqa_storage::mvcc::RecordValueChunk>> {
         control.cancellation().check()?;
-        self.read(|connection| chunk::read(connection, key, self.sequence, offset, output, control))
+        self.read(control, |connection| {
+            chunk::read(connection, key, self.sequence, offset, output, control)
+        })
     }
     fn reclamation_epoch(&self) -> Option<u64> {
         Some(self.reclamation_epoch)
@@ -166,7 +187,9 @@ impl CommittedRecordSnapshot for Snapshot {
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        self.read(|connection| value(connection, key, self.sequence, control, visit))
+        self.read(control, |connection| {
+            value(connection, key, self.sequence, control, visit)
+        })
     }
 
     fn visit_value_bounded(
@@ -177,7 +200,7 @@ impl CommittedRecordSnapshot for Snapshot {
         visit: &mut RecordValueVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        self.read(|connection| {
+        self.read(control, |connection| {
             value_bounded(connection, key, self.sequence, max_bytes, control, visit)
         })
     }
@@ -194,7 +217,7 @@ impl CommittedRecordSnapshot for Snapshot {
             return Ok(());
         };
         let first = first?;
-        self.read(|connection| {
+        self.read(control, |connection| {
             let mut next = Some(first);
             while let Some(key) = next {
                 control.check().map_err(VersionError::from)?;
@@ -220,7 +243,9 @@ impl CommittedRecordSnapshot for Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<RecordMetadata>> {
         control.cancellation().check()?;
-        self.read(|connection| metadata(connection, key, self.sequence, control))
+        self.read(control, |connection| {
+            metadata(connection, key, self.sequence, control)
+        })
     }
 
     fn visit_metadata(
@@ -234,7 +259,7 @@ impl CommittedRecordSnapshot for Snapshot {
             return control.check().map_err(Into::into);
         }
         control.check()?;
-        self.read(|connection| loop {
+        self.read(control, |connection| loop {
             control.check().map_err(VersionError::from)?;
             let record = metadata(connection, requests.key(), self.sequence, control)?;
             requests.accept(record)?;
@@ -258,7 +283,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(());
         }
-        self.read(|connection| {
+        self.read(control, |connection| {
             values::visit(
                 connection,
                 prefix,
@@ -283,7 +308,7 @@ impl CommittedRecordSnapshot for Snapshot {
         if limit == 0 {
             return Ok(());
         }
-        self.read(|connection| {
+        self.read(control, |connection| {
             ordered::visit(
                 connection,
                 prefix,
@@ -355,24 +380,6 @@ pub(super) fn keys(
                 (point, None) => point,
             })
         },
-        visit,
-    )
-}
-
-pub(super) fn point_keys(
-    connection: &Connection,
-    prefix: &[u8],
-    after: Option<&[u8]>,
-    limit: usize,
-    control: &StorageReadControl,
-    visit: &mut impl FnMut(&[u8]) -> PhysicalResult<Option<bool>>,
-) -> PhysicalResult<()> {
-    let upper = prefix_upper_bound(prefix, control)?;
-    walk_keys(
-        after,
-        limit,
-        control,
-        &mut |after| next_key(connection, prefix, after, upper.as_deref(), control),
         visit,
     )
 }
@@ -485,7 +492,10 @@ fn run_info(
         }))
 }
 
-fn point_info(row: &rusqlite::Row<'_>, boundary: CommitSequence) -> PhysicalResult<Option<Info>> {
+pub(super) fn point_info(
+    row: &rusqlite::Row<'_>,
+    boundary: CommitSequence,
+) -> PhysicalResult<Option<Info>> {
     checked_point_info(codec::decode_head(row)?, boundary, || {
         if matches!(row.get_ref(2)?, ValueRef::Null) {
             return Ok(None);
@@ -585,7 +595,7 @@ fn value_bounded(
 }
 
 /// Visit a point payload that [`POINT_VALUE_SQL`] selected with its metadata. The admission order matches [`value_from_info`]: the declared length is checked and reserved before the payload's bytes are borrowed.
-fn inline_value(
+pub(super) fn inline_value(
     row: &rusqlite::Row<'_>,
     info: Info,
     max_bytes: usize,

@@ -12,23 +12,9 @@ use std::sync::{
     Arc,
 };
 
-fn connection() -> Connection {
-    let connection = Connection::open_in_memory().unwrap();
-    connection.execute_batch(
-        "CREATE TABLE _uqa_mvcc_heads (key BLOB PRIMARY KEY, sequence BLOB, compacted INTEGER) WITHOUT ROWID;
-         CREATE TABLE _uqa_mvcc_versions (key BLOB, sequence BLOB, value BLOB, version_id INTEGER PRIMARY KEY);
-         CREATE TABLE _uqa_mvcc_runs (unused INTEGER);"
-    ).unwrap();
-    connection
-        .execute_batch(super::super::super::version_metadata::TABLE.1)
-        .unwrap();
-    super::super::super::version_metadata::create_triggers(&connection).unwrap();
-    connection
-}
-
 #[test]
 fn ordered_predecessors_do_not_scan_retained_history() {
-    let connection = connection();
+    let connection = crate::mvcc::read::history_test_connection();
     connection
         .execute_batch("INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000001000', 0)")
         .unwrap();
@@ -88,7 +74,7 @@ fn ordered_predecessors_do_not_scan_retained_history() {
 
 #[test]
 fn ordered_payloads_align_invisible_heads_tombstones_and_compacted_records() {
-    let connection = connection();
+    let connection = crate::mvcc::read::history_test_connection();
     connection
         .execute_batch(
             "INSERT INTO _uqa_mvcc_heads VALUES
@@ -145,7 +131,7 @@ fn ordered_payloads_align_invisible_heads_tombstones_and_compacted_records() {
 
 #[test]
 fn ordered_metadata_preserves_sequence_and_payload_corruption_errors() {
-    let connection = connection();
+    let connection = crate::mvcc::read::history_test_connection();
     connection
         .execute_batch("INSERT INTO _uqa_mvcc_heads VALUES (x'61', x'0000000000000001', 0)")
         .unwrap();

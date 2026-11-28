@@ -21,9 +21,10 @@ use crate::mvcc::{codec, read, PhysicalResult};
 impl Snapshot {
     pub(super) fn read<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&rusqlite::Connection, u64) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
-        self.store.read(|connection| {
+        self.store.read(control, |connection| {
             let current = history::epoch(connection)?;
             if self.metadata_epoch().as_u64() >= current {
                 return Err(VersionError::InvalidEncoding(
@@ -40,7 +41,7 @@ impl Snapshot {
         control: &StorageReadControl,
     ) -> VersionResult<Option<BackupCursorKey>> {
         control.cancellation().check()?;
-        self.read(|connection, _| {
+        self.read(control, |connection, _| {
             let length: Option<i64> = connection.prepare_cached("SELECT length(namespace) FROM _uqa_mvcc_identifiers ORDER BY namespace DESC LIMIT 1")?.query_row([], |row| row.get(0)).optional()?;
             let Some(length) = length else { return Ok(None) };
             let length = crate::read_control::payload_length(length)?;
@@ -64,7 +65,7 @@ impl Snapshot {
         visit: &mut BackupRecordImageVisitor<'_>,
     ) -> VersionResult<()> {
         control.cancellation().check()?;
-        self.read(|connection, _| {
+        self.read(control, |connection, _| {
             read::keys(connection, b"", after, limit, control, &mut |key| {
                 let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
                 read::with_point_info(

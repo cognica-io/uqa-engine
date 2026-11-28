@@ -43,7 +43,7 @@ fn child(path: &std::path::Path, mode: usize, stage: usize) {
         store
             .with_receipt_admission(&control, |leases| {
                 let mut owners = Vec::new();
-                store.with_write(&control, |connection| {
+                store.with_admission(&control, |connection| {
                     crate::mvcc::write::allocate_batch(
                         connection,
                         store.identity,

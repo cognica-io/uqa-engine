@@ -347,20 +347,6 @@ pub(super) fn str_predicate(lhs: &Value, rhs: &Value, f: impl Fn(&str, &str) -> 
     }
 }
 
-/// `=~` is an UNANCHORED regular-expression search in AGE
-/// (`PostgreSQL` `~` semantics): `'abc' =~ 'b'` is true. Non-string
-/// operands (including null) yield null.
-pub(super) fn regex_match(lhs: &Value, rhs: &Value) -> Result<Value, CypherError> {
-    match (lhs, rhs) {
-        (Value::Str(a), Value::Str(pattern)) => {
-            let re = regex::Regex::new(pattern)
-                .map_err(|e| CypherError::TypeError(format!("invalid regular expression: {e}")))?;
-            Ok(Value::Bool(re.is_match(a)))
-        }
-        _ => Ok(Value::Null),
-    }
-}
-
 pub(super) fn unsupported_argument(function: &str, value: &Value) -> CypherError {
     CypherError::TypeError(format!(
         "{function}() unsupported argument agtype {}",

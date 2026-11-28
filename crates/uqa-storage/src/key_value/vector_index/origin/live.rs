@@ -4,39 +4,31 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Session-bound mutations and fresh query snapshots use actual catalog incarnations.
+//! Provider access to the selected catalog, canonical records and journal transaction.
 
-mod runtime;
-
-use super::{invalid, KeyValueDiskANNCanonical, RetainedDiskANNCanonical};
-use crate::diskann_index::{
-    catalog::{DiskANNIndexResolver, DiskANNIndexScope},
-    format::DiskANNVectorVersion,
-    pages::DiskANNReadLimits,
-    RetainedDiskANNIndex,
-};
-use crate::key_value::{catalog::diskann::Binding, publication::selected_generation};
+use super::{invalid, KeyValueDiskANNCanonical};
+use crate::key_value::catalog::diskann::Binding;
 use crate::{
-    read_control::StorageReadControl, vector_index::DiskANNIndexParams, RelationIdentity,
-    StorageBackendResult,
+    diskann_index::{
+        catalog::{DiskANNIndexResolver, DiskANNIndexScope},
+        changes::{DiskANNPruneRequest, DiskANNPruneResult},
+        format::DiskANNVectorVersion,
+        maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
+        pages::DiskANNReadLimits,
+        DiskANNLiveBinding, DiskANNPersistentBackend, DiskANNRetainedMutation,
+        PersistentDiskANNHandle,
+    },
+    key_value::{KeyValueDiskANNPruner, KeyValueDiskANNSource},
+    read_control::StorageReadControl,
+    RelationIdentity, StorageBackendResult,
 };
 use std::sync::Arc;
-use uqa_core::{memory::MemoryReservation, DocId};
+use uqa_core::DocId;
 
-/// A session-bound handle to an already published index. Replacements join the session's original transaction; snapshots own fixed canonical and physical views independently of subsequent writes, undo and session closure. Structural creation, rebuilding and removal belong to the catalog lifecycle owner.
-pub struct KeyValueDiskANNHandle {
-    canonical: KeyValueDiskANNCanonical,
-    index: RelationIdentity,
-    resolver: Arc<dyn DiskANNIndexResolver + Send + Sync>,
-    scope: DiskANNIndexScope,
-    parameters: DiskANNIndexParams,
-    limits: DiskANNReadLimits,
-    control: StorageReadControl,
-    _memory: MemoryReservation,
-}
+/// A session-bound index handle. Each snapshot retains the generation selected when it opens.
+pub type KeyValueDiskANNHandle = PersistentDiskANNHandle<KeyValueDiskANNCanonical>;
 
 impl KeyValueDiskANNCanonical {
-    /// Open a live handle through the actual catalog and published head. Missing or invalid publication is an error; this never creates or adopts an index implicitly.
     pub fn bind(
         self,
         index: RelationIdentity,
@@ -44,100 +36,86 @@ impl KeyValueDiskANNCanonical {
         limits: DiskANNReadLimits,
         control: &StorageReadControl,
     ) -> StorageBackendResult<KeyValueDiskANNHandle> {
-        control.check()?;
-        let bytes = [
-            size_of::<KeyValueDiskANNHandle>(),
-            self.index.table.unadmitted_payload_bytes(),
-            self.index.field.unadmitted_payload_bytes(),
-            index.schema.capacity(),
-            index.name.capacity(),
-        ]
-        .into_iter()
-        .try_fold(0_usize, usize::checked_add)
-        .ok_or(uqa_core::memory::MemoryError::SizeOverflow)?;
-        let memory = control.memory().reserve(bytes)?;
-        self.initialize_populations(&index, &*resolver, control)?;
-        let source = self.retain_for_index(&index, control)?;
-        let scope = source.index_scope(&*resolver, control)?;
-        let parameters = source
-            .index_parameters()
-            .ok_or_else(|| invalid("live index has no bound parameters"))?;
-        source
-            .selected_source(&*resolver, control)?
-            .ok_or_else(|| invalid("live index has no published generation"))?;
-        control.check()?;
-        Ok(KeyValueDiskANNHandle {
-            canonical: self,
-            index,
-            resolver,
-            scope,
-            parameters,
-            limits,
-            control: control.clone(),
-            _memory: memory,
-        })
+        PersistentDiskANNHandle::bind(self, index, resolver, limits, control)
     }
 }
 
-impl KeyValueDiskANNHandle {
-    /// Atomically replace a complete tensor; an empty slice deletes its vector membership while preserving the replacement origin. Catalog checks and commit requirements are evaluated with the canonical write, not in a preceding read transaction.
-    pub fn replace(
+impl DiskANNPersistentBackend for KeyValueDiskANNCanonical {
+    const MISSING_PUBLICATION: &'static str = "live index has no published generation";
+    const MISSING_PARAMETERS: &'static str = "live index has no bound parameters";
+    const CHANGED_PARAMETERS: &'static str = "live index parameters changed";
+
+    fn dimensions(&self) -> u32 {
+        self.index.dimensions
+    }
+    fn name_payload_bytes(&self) -> [usize; 2] {
+        [
+            self.index.table.unadmitted_payload_bytes(),
+            self.index.field.unadmitted_payload_bytes(),
+        ]
+    }
+    fn install_population(
         &self,
+        source: &Self::Read,
+        scope: &DiskANNIndexScope,
+        selected: &KeyValueDiskANNSource,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.index.store.with_mutation(&mut |read, batch| {
+            source.initialize_population(scope, selected, read, batch, control)
+        })
+    }
+    fn replace_bound(
+        &self,
+        live: &DiskANNLiveBinding<Self>,
         document: DocId,
         vectors: &[Vec<f32>],
     ) -> StorageBackendResult<DiskANNVectorVersion> {
-        self.control.check()?;
-        self.canonical
-            .replace_guarded(document, vectors, &self.control, &mut |read, batch| {
-                let canonical = &self.canonical.index;
-                let binding = Binding::capture(
-                    read,
-                    &canonical.table,
-                    &canonical.field,
-                    canonical.dimensions,
-                    &self.index,
-                    &self.control,
-                )?;
-                let current = binding.scope(read, &*self.resolver, &self.control, &self.control)?;
-                self.validate(&current, binding.parameters)?;
-                if selected_generation(&current, read, &self.control)?.is_none() {
-                    return Err(invalid("live index has no published generation"));
-                }
-                binding.require_current(read, batch, &self.control)
-            })
+        self.replace_guarded(document, vectors, &live.control, &mut |read, batch| {
+            let canonical = &self.index;
+            let binding = Binding::capture(
+                read,
+                &canonical.table,
+                &canonical.field,
+                canonical.dimensions,
+                &live.index,
+                &live.control,
+            )?;
+            let current = binding.scope(read, &*live.resolver, &live.control, &live.control)?;
+            live.validate(&current, binding.parameters)?;
+            live.require_publication(&current, read)?;
+            binding.require_current(read, batch, &live.control)
+        })
     }
-
-    /// Prepare one current query view. The returned `VectorIndex` can be reused and nested without rereading resident PQ data, and keeps its captured generation after this handle advances or closes.
-    pub fn snapshot(&self) -> StorageBackendResult<RetainedDiskANNIndex<RetainedDiskANNCanonical>> {
-        self.retain_current()?
-            .into_vector_index(&*self.resolver, self.limits, &self.control)?
-            .ok_or_else(|| invalid("live index has no published generation"))
+    fn measure_changes(
+        source: &Self::Read,
+        coverage: &KeyValueDiskANNPruner,
+        request: DiskANNStatisticsRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNStatisticsPage> {
+        source.measure_changes(coverage, request, control)
     }
-
-    fn retain_current(&self) -> StorageBackendResult<RetainedDiskANNCanonical> {
-        self.control.check()?;
-        let source = self
-            .canonical
-            .retain_for_index(&self.index, &self.control)?;
-        let current = source.index_scope(&*self.resolver, &self.control)?;
-        self.validate(
-            &current,
-            source
-                .index_parameters()
-                .ok_or_else(|| invalid("live index has no bound parameters"))?,
-        )?;
-        Ok(source)
-    }
-
-    fn validate(
+    fn prune_page(
         &self,
-        current: &DiskANNIndexScope,
-        parameters: DiskANNIndexParams,
-    ) -> StorageBackendResult<()> {
-        self.scope.require_same_index(current, &self.control)?;
-        if self.parameters != parameters {
-            return Err(invalid("live index parameters changed"));
-        }
-        self.control.check()
+        source: &Self::Read,
+        resolver: &dyn DiskANNIndexResolver,
+        coverage: &KeyValueDiskANNPruner,
+        request: DiskANNPruneRequest,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<DiskANNPruneResult> {
+        let mut result = None;
+        self.index
+            .store
+            .try_with_transaction_mutation(&mut |read, batch| {
+                result = Some(source.prune_captured_changes(
+                    resolver,
+                    coverage,
+                    (read, batch),
+                    request,
+                    control,
+                )?);
+                Ok(())
+            })?;
+        result.ok_or_else(|| invalid("journal page requires the caller's transaction"))
     }
 }

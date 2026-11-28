@@ -19,7 +19,11 @@ fn an_occupied_reserve_allowance_cannot_block_an_independent_owner() {
     assert_eq!(owner.transaction().allocation(), 1);
     assert_eq!(
         store
-            .read(|connection| Ok(codec::header(connection, store.identity)?.allocated))
+            .read(&control, |connection| Ok(codec::header(
+                connection,
+                store.identity
+            )?
+            .allocated))
             .unwrap(),
         1
     );
@@ -31,7 +35,11 @@ fn an_occupied_reserve_allowance_cannot_block_an_independent_owner() {
     assert_eq!(owner.transaction().allocation(), 2);
     assert_eq!(
         store
-            .read(|connection| Ok(codec::header(connection, store.identity)?.allocated))
+            .read(&control, |connection| Ok(codec::header(
+                connection,
+                store.identity
+            )?
+            .allocated))
             .unwrap(),
         2
     );

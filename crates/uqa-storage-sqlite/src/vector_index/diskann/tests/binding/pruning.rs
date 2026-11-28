@@ -80,6 +80,23 @@ fn native_diskann_pruning_preserves_late_writes_retained_views_and_cold_reopen()
                 .unwrap();
             let changed = canonical.replace(1, &[vec![0.0, 1.0]], &control).unwrap();
             peer.commit_transaction().unwrap();
+            let before = change_count(&connection);
+            let error = uqa_storage::diskann_index::DiskANNPersistentBackend::prune_page(
+                &canonical,
+                coverage.source(),
+                &Resolver,
+                &pruner,
+                page(64),
+                &control,
+            )
+            .expect_err("the provider must decline an idle writer at mutation admission");
+            assert!(
+                error
+                    .to_string()
+                    .contains("journal page requires the caller's transaction"),
+                "{error}"
+            );
+            assert_eq!(change_count(&connection), before);
             let old_cursor = prune_pass(&connection, &canonical, &pruner, &control);
             assert_eq!(
                 coverage.source().origin(1, &control).unwrap(),
@@ -330,14 +347,39 @@ fn finite_discovery(connection: &ManagedConnection, control: &StorageReadControl
     let canonical = canonical(connection, TABLE, FIELD, 2);
     let retained = canonical.retain(control).unwrap();
     canonical.replace(9, &[], control).unwrap();
+    let page_control =
+        StorageReadControl::new(control.memory(), &uqa_core::CancellationToken::new());
+    connection.begin_transaction().unwrap();
+    page_control.cancellation().cancel();
+    assert!(matches!(
+        pruner.prune(page(64), &page_control),
+        Err(uqa_storage::StorageBackendError::Cancelled(_))
+    ));
+    let first = pruner.prune(page(64), control).unwrap();
+    connection.rollback_transaction().unwrap();
+    assert!(connection
+        .try_with_native_transaction_write::<()>(|_, _| panic!("idle native writer ran"))
+        .unwrap()
+        .is_none());
+    assert!(pruner.prune(page(64), control).is_err());
     connection.begin_transaction().unwrap();
     let result = pruner.prune(page(64), control).unwrap();
+    assert_eq!(result, first);
     assert_eq!((result.examined, result.removed, result.next), (1, 1, None));
     connection.commit_transaction().unwrap();
     assert_eq!(change_count(connection), 1);
     assert!(retained.next_change_after(None, control).unwrap().is_some());
     original.cancellation().cancel();
+    let idle = pruner.prune(page(64), control).unwrap_err();
+    assert!(
+        idle.to_string()
+            .contains("journal page requires the caller's transaction"),
+        "{idle}"
+    );
     connection.begin_transaction().unwrap();
-    assert!(pruner.prune(page(64), control).is_err());
+    assert!(matches!(
+        pruner.prune(page(64), control),
+        Err(uqa_storage::StorageBackendError::Cancelled(_))
+    ));
     connection.rollback_transaction().unwrap();
 }

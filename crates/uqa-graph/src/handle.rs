@@ -214,6 +214,13 @@ impl GraphStoreHandle {
 }
 
 impl GraphStore for GraphStoreHandle {
+    fn check_read(&self) -> GraphStoreResult<()> {
+        match self {
+            Self::Memory(store) => store.check_read(),
+            Self::Persistent(store) => store.check_read(),
+        }
+    }
+
     fn vertex_id_page(
         &self,
         graph: &str,

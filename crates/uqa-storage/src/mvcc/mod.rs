@@ -75,8 +75,8 @@ pub use populations::{
     DiskANNPopulationHeader, DiskANNPopulationOrigin, DiskANNPopulationRecordLayout,
 };
 pub use receipts::{
-    receipt_lease_id, ReceiptAcknowledgement, RetainedTransactionAllocation,
-    DEFAULT_RECEIPT_RETENTION_LIMIT,
+    receipt_lease_id, ReceiptAcknowledgement, ReceiptReclamation, ReceiptReclamationBatch,
+    RetainedTransactionAllocation, DEFAULT_RECEIPT_RETENTION_LIMIT,
 };
 pub(crate) use resources::WeakResourceLease;
 pub use resources::{
@@ -101,16 +101,16 @@ pub use session::{
     VersionedKeyValueStore, VersionedSessionOptions,
 };
 pub use tombstones::{
-    reclaim_key_value_diskann_tombstones, reclaim_tombstone_prefix, verify_tombstone_reclamation,
-    verify_tombstone_reclamation_pages, TombstoneReclamationPage, TombstoneReclamationRequest,
-    TombstoneReclamationStep, RECLAMATION_DOMAIN_PREFIX, RECLAMATION_EPOCH_NAMESPACE,
-    TOMBSTONE_RECLAMATION_PAGE,
+    reclaim_key_value_diskann_tombstones, reclaim_tombstone_prefix, reclamation_domain_prefix,
+    verify_tombstone_reclamation, verify_tombstone_reclamation_pages, TombstoneReclamationPage,
+    TombstoneReclamationRequest, TombstoneReclamationStep, RECLAMATION_DOMAIN_PREFIX,
+    RECLAMATION_EPOCH_NAMESPACE, TOMBSTONE_RECLAMATION_PAGE,
 };
 mod metadata;
 pub use metadata::{
     retain_backup_snapshot, BackupCursorKey, BackupRecordImagePosition, BackupRecordImageVisitor,
-    BackupRecordPositionVisitor, CommittedBackupSnapshot, IdentifierWatermarkVisitor,
-    MetadataEpoch,
+    BackupRecordPositionVisitor, CommittedBackupSnapshot, IdentifierEpochHistory,
+    IdentifierWatermarkVisitor, MetadataEpoch,
 };
 pub use types::{CommitSequence, RecordWrite, VersionError, VersionResult};
 pub use view::{

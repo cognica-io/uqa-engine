@@ -5,6 +5,7 @@
 //
 
 use super::*;
+use crate::key_value::KeyValueReadRevision;
 use crate::read_control::{KeyValueReadVisitor, ValueReadVisitor};
 
 struct Reader {

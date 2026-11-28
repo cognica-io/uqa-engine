@@ -22,7 +22,7 @@ mod definition;
 mod diagnostics;
 pub(crate) mod image_source;
 mod resources;
-pub use compiled::CompiledAnalyzer;
+pub use compiled::{standard_term_analyzer, CompiledAnalyzer};
 pub use definition::{AnalyzerConfigurationError, AnalyzerConfigurationImage, AnalyzerDefinition};
 pub use image_source::AnalyzerImageSource;
 pub use resources::{AnalyzerResource, AnalyzerResourceKind, CapturedAnalyzer};

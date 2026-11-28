@@ -54,12 +54,14 @@ impl RevisionScopes {
     }
 
     /// Prepare independently so a later record or summary failure publishes neither root.
-    pub(super) fn with_writes(
+    pub(super) fn with_writes<'a>(
         &self,
-        writes: &[PreparedRecordWrite],
-        revision: PrivateRecordRevision,
+        keys: impl IntoIterator<Item = &'a [u8]>,
+        root_revision: PrivateRecordRevision,
+        forwarded: Option<PrivateRecordRevision>,
         control: &StorageReadControl,
     ) -> VersionResult<Self> {
+        let revision = forwarded.unwrap_or(root_revision);
         let memory = self.changes.owner.state.lock().records.budget().clone();
         // Distinct summary owners can survive with savepoints; charge their retained metadata as well as their keys, records and runs.
         let owner_memory = memory.reserve(
@@ -73,9 +75,21 @@ impl RevisionScopes {
         };
         let owned_control = StorageReadControl::new(&memory, control.cancellation());
         let value = revision.as_u64().to_be_bytes();
-        for write in writes {
+        for key in keys {
             control.check()?;
-            if let Some(key) = (self.classify)(write.key())? {
+            if let Some(key) = (self.classify)(key)? {
+                // A rebuilt root visits keys in storage order. A forwarded older record cannot lower the newest revision of its scope.
+                if forwarded.is_some()
+                    && next
+                        .changes
+                        .get(key, control)?
+                        .as_ref()
+                        .map(decode_revision)
+                        .transpose()?
+                        .is_some_and(|current| current >= revision)
+                {
+                    continue;
+                }
                 let write =
                     PreparedRecordWrite::copy_bytes(key, None, Some(&value), &owned_control)?;
                 next.changes.apply_owned(&[write], control)?;

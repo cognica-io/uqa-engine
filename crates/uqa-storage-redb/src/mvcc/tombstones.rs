@@ -42,14 +42,9 @@ pub(super) fn validate(
     {
         control.check()?;
         let (key, value) = entry.map_err(redb_error)?;
-        let Some(prefix) = key.value().strip_prefix(RECLAMATION_DOMAIN_PREFIX) else {
+        let Some(prefix) = uqa_storage::mvcc::reclamation_domain_prefix(key.value())? else {
             break;
         };
-        if prefix.len() > 1024 {
-            return Err(VersionError::InvalidEncoding(
-                "oversized reclamation domain",
-            ));
-        }
         prepared.validate_reclamation_epoch(
             prefix,
             codec::decode_u64(value.value())?,
@@ -71,11 +66,7 @@ pub(super) fn reclaim(
         let metadata = transaction.open_table(METADATA).map_err(redb_error)?;
         codec::validate_metadata(&metadata, store.identity)?;
         let current = CommitSequence::from_u64(codec::read_u64(&metadata, "sequence")?);
-        if request.through > current {
-            return Err(VersionError::InvalidEncoding(
-                "tombstone cutoff exceeds committed visibility",
-            ));
-        }
+        request.validate_cutoff(current)?;
         let mut heads = transaction.open_table(HEADS).map_err(redb_error)?;
         let mut versions = transaction.open_table(VERSIONS).map_err(redb_error)?;
         let mut fingerprints = transaction

@@ -6,13 +6,14 @@
 
 //! Approximate top-k and exact threshold search retain each reader's workspace allowance.
 
-use uqa_core::{DocId, PostingList};
+use std::cmp::Reverse;
+use uqa_core::{memory::BudgetedBinaryHeap, DocId, PostingList};
 
 use super::state::{IVFData, IVFState, StoredVector};
 use crate::read_control::StorageReadControl;
 use crate::vector_index::{
-    cosine_similarity_with_norms,
-    query::{check, nearest_normalized_centroids, postings_from_scores, VectorQueryBuffer},
+    cosine_similarity_with_norms, maximum_tensor_score,
+    query::{check, nearest_normalized_centroids, postings_from_scores, TopK, VectorQueryBuffer},
     validate_vector_values, vector_norm,
 };
 use crate::{StorageBackendError, StorageBackendResult};
@@ -26,50 +27,75 @@ impl IVFData {
         k: usize,
         control: Option<&StorageReadControl>,
     ) -> StorageBackendResult<PostingList> {
-        let vectors = &self.vectors;
-        let state = self.state();
-        let mut scored = VectorQueryBuffer::<(DocId, f32)>::new(control);
-        let score = |vector: &StoredVector,
-                     output: &mut VectorQueryBuffer<(DocId, f32)>|
-         -> StorageBackendResult<()> {
-            check(control)?;
-            output.push((
-                vector.doc_id,
-                cosine_similarity_with_norms(query, &vector.raw_vector, norm, vector.norm),
-            ))
+        let fallback;
+        let control = if let Some(control) = control {
+            control
+        } else {
+            fallback = StorageReadControl::with_limit(usize::MAX);
+            &fallback
         };
-        match state {
-            IVFState::Untrained => {
-                for vector in vectors.values() {
-                    score(vector, &mut scored)?;
-                }
+        let mut top = TopK::new(k, control);
+        let mut current: Option<(DocId, f32)> = None;
+        let mut score = |vector: &StoredVector| -> StorageBackendResult<()> {
+            control.check()?;
+            let similarity =
+                cosine_similarity_with_norms(query, &vector.raw_vector, norm, vector.norm);
+            if let Some((_, best)) = current.as_mut().filter(|(id, _)| *id == vector.doc_id) {
+                *best = maximum_tensor_score(*best, similarity);
+            } else if let Some((document, best)) = current.replace((vector.doc_id, similarity)) {
+                top.offer_raw(document, best)?;
             }
-            IVFState::Trained | IVFState::Stale => {
-                let centroids = &self.centroids;
-                if centroids.is_empty() {
-                    for vector in vectors.values() {
-                        score(vector, &mut scored)?;
-                    }
-                } else {
-                    let probes = nearest_normalized_centroids(
-                        normalized,
-                        centroids,
-                        self.nprobe(),
-                        control,
-                    )?;
-                    let lists = &self.inverted_lists;
-                    for &centroid in probes.iter() {
-                        for key in lists.get(centroid).into_iter().flatten() {
-                            check(control)?;
-                            if let Some(vector) = vectors.get(key) {
-                                score(vector, &mut scored)?;
-                            }
-                        }
-                    }
-                }
+            Ok(())
+        };
+        if self.state() == IVFState::Untrained || self.centroids.is_empty() {
+            for vector in self.vectors.values() {
+                score(vector)?;
+            }
+        } else {
+            let probes = nearest_normalized_centroids(
+                normalized,
+                &self.centroids,
+                self.nprobe(),
+                Some(control),
+            )?;
+            self.visit_probed_vectors(&probes, control, score)?;
+        }
+        if let Some((document, best)) = current {
+            top.offer_raw(document, best)?;
+        }
+        top.finish(control)
+    }
+
+    // Each centroid list is sorted by (document, ordinal). Merge by document, keeping probe order within each document for the tensor maximum.
+    fn visit_probed_vectors(
+        &self,
+        probes: &[usize],
+        control: &StorageReadControl,
+        mut visit: impl FnMut(&StoredVector) -> StorageBackendResult<()>,
+    ) -> StorageBackendResult<()> {
+        let mut heads = BudgetedBinaryHeap::new(control.memory());
+        for (rank, &centroid) in probes.iter().enumerate() {
+            control.check()?;
+            if let Some(&(document, _)) = self
+                .inverted_lists
+                .get(centroid)
+                .and_then(|list| list.first())
+            {
+                heads.push(Reverse((document, rank, 0_usize)))?;
             }
         }
-        postings_from_scores(scored, Some(k), control)
+        while let Some(Reverse((_, rank, position))) = heads.pop() {
+            control.check()?;
+            let list = &self.inverted_lists[probes[rank]];
+            if let Some(vector) = self.vectors.get(&list[position]) {
+                visit(vector)?;
+            }
+            let next = position + 1;
+            if let Some(&(document, _)) = list.get(next) {
+                heads.push(Reverse((document, rank, next)))?;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn search_above_threshold(

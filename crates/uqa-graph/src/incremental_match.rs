@@ -49,7 +49,7 @@ impl IncrementalPatternMatcher {
         let mut matches = BTreeSet::new();
         for entry in result.inner().entries() {
             if let Some(gp) = result.get_graph_payload(entry.doc_id) {
-                let mut vertices = gp.subgraph_vertices.clone();
+                let mut vertices = gp.subgraph_vertices.to_vec();
                 vertices.sort_unstable();
                 vertices.dedup();
                 matches.insert(vertices);
@@ -113,7 +113,7 @@ impl IncrementalPatternMatcher {
             let result = GMatch::new(constrained_pattern, &self.graph).execute(store)?;
             for entry in result.inner().entries() {
                 if let Some(gp) = result.get_graph_payload(entry.doc_id) {
-                    let mut vertices = gp.subgraph_vertices.clone();
+                    let mut vertices = gp.subgraph_vertices.to_vec();
                     vertices.sort_unstable();
                     vertices.dedup();
                     new_matches.insert(vertices);

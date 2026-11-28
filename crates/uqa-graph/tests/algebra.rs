@@ -45,9 +45,9 @@ fn arb_graph_posting_list() -> impl Strategy<Value = GraphPostingList> {
                 payloads.insert(
                     id,
                     GraphPayload {
-                        subgraph_vertices: vec![id, u64::MAX - id, id],
-                        subgraph_edges: vec![id * 10, id * 10],
-                        graph_name: format!("graph-{id}"),
+                        subgraph_vertices: [id, u64::MAX - id, id].into(),
+                        subgraph_edges: [id * 10, id * 10].into(),
+                        graph_name: format!("graph-{id}").into(),
                         score_override: id.is_multiple_of(2).then_some(id as f64 + 0.25),
                     },
                 );
@@ -99,11 +99,11 @@ fn assert_merged_graph_payload(
         (Some(left), Some(right)) => {
             let actual = merged.get_graph_payload(doc_id).unwrap();
             assert_eq!(
-                actual.subgraph_vertices,
+                actual.subgraph_vertices.as_ref(),
                 merge(&left.subgraph_vertices, &right.subgraph_vertices)
             );
             assert_eq!(
-                actual.subgraph_edges,
+                actual.subgraph_edges.as_ref(),
                 merge(&left.subgraph_edges, &right.subgraph_edges)
             );
             assert_eq!(actual.graph_name, left.graph_name);

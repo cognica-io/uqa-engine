@@ -103,15 +103,14 @@ impl SQLiteInvertedIndex {
                 } else {
                     "SELECT cluster_id, posting_count, CASE WHEN typeof(score_blob) = 'blob' THEN length(score_blob) ELSE -1 END FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND ?4 IS NULL ORDER BY cluster_id LIMIT 1"
                 };
-                let row: Option<(i64, i64, i64)> = connection.query_row(
-                    sql,
+                let row: Option<(i64, i64, i64)> = connection.prepare_cached(sql)?.query_row(
                     params![self.table.as_str(), field, term.as_bytes(), last], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 ).optional()?;
                 let Some((id, count, length)) = row else { break; };
                 let length = payload_length(length)?;
                 control.check()?;
                 let _payload = control.memory().reserve(length)?;
-                let mut statement = connection.prepare("SELECT score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4")?;
+                let mut statement = connection.prepare_cached("SELECT score_blob FROM _occurrence_clusters WHERE table_name = ?1 AND field = ?2 AND term = ?3 AND cluster_id = ?4")?;
                 let mut rows = statement.query(params![self.table.as_str(), field, term.as_bytes(), id])?;
                 let row = rows.next()?.ok_or_else(changed_snapshot)?;
                 let bytes = blob(row, 0)?;

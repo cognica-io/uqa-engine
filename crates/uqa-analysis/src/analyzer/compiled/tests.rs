@@ -223,3 +223,24 @@ fn retained_replacement_preparation_matches_regex_capture_expansion() {
         );
     }
 }
+
+#[test]
+fn standard_term_extraction_matches_configured_and_registered_analysis() {
+    for language in ["english", "", "ENGLISH", "한국어"] {
+        let config = crate::standard_analyzer(language);
+        let registered = config.compile().unwrap();
+        let prepared = super::standard_term_analyzer(language).unwrap();
+        for text in [
+            "",
+            "the and of",
+            "Cats cats CATS",
+            "ΟΣ ΣΟΣ",
+            "À bientôt cafe\u{301}",
+            "한국 東京 𝔄",
+        ] {
+            let expected = config.analyze(text).unwrap();
+            assert_eq!(registered.analyze(text).unwrap(), expected);
+            assert_eq!(prepared(text).unwrap(), expected);
+        }
+    }
+}
