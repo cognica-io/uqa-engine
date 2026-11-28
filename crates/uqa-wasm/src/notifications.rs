@@ -56,7 +56,7 @@ impl Listener {
         }
         match result {
             Poll::Pending => json!({ "pending": true }),
-            Poll::Ready(Ok(event)) => json!({ "event": event.map(event_value) }),
+            Poll::Ready(Ok(event)) => json!({ "event": event.as_ref().map(event_value) }),
             Poll::Ready(Err(error)) => {
                 let value = failure(&error);
                 self.failure = Some(error);
@@ -171,31 +171,16 @@ fn failure(error: &NotificationSubscriptionError) -> JSON {
     json!({ "failure": { "code": error.code(), "diagnostic": error.original_error().map(ToString::to_string) } })
 }
 
-fn event_value(event: NotificationEvent) -> JSON {
-    let (kind, identity, sequence, notification, cause) = match event {
-        NotificationEvent::Notification {
-            identity,
-            sequence,
-            notification,
-        } => (
-            "notification",
-            identity,
-            Some(sequence),
-            Some(notification),
-            None,
-        ),
-        NotificationEvent::ResyncRequired { identity, cause } => {
-            ("resync_required", identity, None, None, Some(cause.code()))
-        }
-        NotificationEvent::Reconnected { identity } => ("reconnected", identity, None, None, None),
-    };
+fn event_value(event: &NotificationEvent) -> JSON {
+    let identity = event.identity();
+    let notification = event.notification();
     json!({
-        "kind": kind, "epoch": identity.epoch.to_string(), "requestId": identity.request_id.map(|value| value.to_string()),
+        "kind": event.kind(), "epoch": identity.epoch.to_string(), "requestId": identity.request_id.as_ref().map(ToString::to_string),
         // Decimal text crosses JSON without passing through a JavaScript Number.
-        "sequence": sequence.map(|value| value.to_string()),
-        "processId": notification.as_ref().map(|value| value.process_id),
-        "channel": notification.as_ref().map(|value| value.channel.as_str()),
-        "payload": notification.as_ref().map(|value| value.payload.as_str()), "cause": cause,
+        "sequence": event.sequence().map(|value| value.to_string()),
+        "processId": notification.map(|value| value.process_id),
+        "channel": notification.map(|value| value.channel.as_str()),
+        "payload": notification.map(|value| value.payload.as_str()), "cause": event.cause().map(Kind::code),
     })
 }
 
