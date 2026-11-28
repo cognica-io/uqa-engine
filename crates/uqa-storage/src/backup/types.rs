@@ -10,11 +10,31 @@ use crate::mvcc::{CommitSequence, DatabaseId};
 
 use super::{BackupError, BackupResult};
 
+/// Byte-slice length and identity content have distinct diagnostics at language boundaries.
+#[derive(Debug, thiserror::Error)]
+pub enum ParseBackupIdentityError {
+    #[error("a backup identity must contain exactly 16 bytes")]
+    Length,
+    #[error(transparent)]
+    Invalid(#[from] BackupError),
+}
+
 macro_rules! identity {
     ($name:ident, $documentation:literal) => {
         #[doc = $documentation]
         #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
         pub struct $name([u8; 16]);
+
+        impl TryFrom<&[u8]> for $name {
+            type Error = ParseBackupIdentityError;
+
+            fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+                let bytes = value
+                    .try_into()
+                    .map_err(|_| ParseBackupIdentityError::Length)?;
+                Ok(Self::from_bytes(bytes)?)
+            }
+        }
 
         impl $name {
             pub fn new() -> BackupResult<Self> {

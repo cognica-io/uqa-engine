@@ -147,6 +147,24 @@ pub enum FunctionVolatility {
     Volatile,
 }
 
+impl std::str::FromStr for FunctionVolatility {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        if name.eq_ignore_ascii_case("volatile") {
+            Ok(Self::Volatile)
+        } else if name.eq_ignore_ascii_case("stable") {
+            Ok(Self::Stable)
+        } else if name.eq_ignore_ascii_case("immutable") {
+            Ok(Self::Immutable)
+        } else {
+            Err(format!(
+                "unknown SQL function volatility `{name}`; expected volatile, stable, or immutable"
+            ))
+        }
+    }
+}
+
 /// Body of a user-defined routine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum FunctionBody {

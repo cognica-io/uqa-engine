@@ -24,8 +24,8 @@ use std::sync::Arc;
 pub use uqa_storage::backup::{
     BackupCapabilities, BackupCapturePhase, BackupCaptureProgress, BackupCaptureReport,
     BackupCaptureStep, BackupCollectionReport, BackupCut, BackupError, BackupId, BackupKey,
-    BackupLimits, BackupListing, BackupResult, BackupRoot, LocalRepository, PersistentBackupTarget,
-    Protection, ProtectionId, RestoreId,
+    BackupLimits, BackupListing, BackupResult, BackupRoot, LocalRepository,
+    ParseBackupIdentityError, PersistentBackupTarget, Protection, ProtectionId, RestoreId,
 };
 pub use uqa_storage::read_control::StorageReadControl;
 pub use uqa_storage::StorageEncryptionKey;

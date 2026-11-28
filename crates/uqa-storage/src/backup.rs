@@ -80,8 +80,8 @@ pub use source::{
 };
 pub use types::{
     BackupCapabilities, BackupCut, BackupId, BackupLimits, ImageDigest, ImageFormat, ImageProvider,
-    NamespaceId, ObjectId, ObjectSpan, ProtectionId, RepositoryId, RestoreId, SnapshotId,
-    UnitAddress, UnitKind,
+    NamespaceId, ObjectId, ObjectSpan, ParseBackupIdentityError, ProtectionId, RepositoryId,
+    RestoreId, SnapshotId, UnitAddress, UnitKind,
 };
 
 #[cfg(test)]

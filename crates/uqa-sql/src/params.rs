@@ -33,6 +33,16 @@ pub use binding::{
 };
 pub use tensor::SQLTensor;
 
+/// Borrow SQL text and parameter slices from a host batch without copying either payload.
+pub fn borrow_sql_batch<Q: AsRef<str>, P: AsRef<[SQLParam]>>(
+    statements: &[(Q, P)],
+) -> Vec<(&str, &[SQLParam])> {
+    statements
+        .iter()
+        .map(|(sql, params)| (sql.as_ref(), params.as_ref()))
+        .collect()
+}
+
 /// Value bound to a `$N` placeholder.
 #[derive(Debug, Clone)]
 pub enum SQLParam {

@@ -93,6 +93,58 @@ pub enum NotificationEvent {
     },
 }
 
+impl NotificationEvent {
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Notification { .. } => "notification",
+            Self::ResyncRequired { .. } => "resync_required",
+            Self::Reconnected { .. } => "reconnected",
+        }
+    }
+
+    #[must_use]
+    pub const fn identity(&self) -> &NotificationIdentity {
+        match self {
+            Self::Notification { identity, .. }
+            | Self::ResyncRequired { identity, .. }
+            | Self::Reconnected { identity } => identity,
+        }
+    }
+
+    #[must_use]
+    pub const fn sequence(&self) -> Option<u64> {
+        match self {
+            Self::Notification { sequence, .. } => Some(*sequence),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn cause(&self) -> Option<NotificationFailureKind> {
+        match self {
+            Self::ResyncRequired { cause, .. } => Some(*cause),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub const fn notification(&self) -> Option<&SQLNotification> {
+        match self {
+            Self::Notification { notification, .. } => Some(notification),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn into_notification(self) -> Option<SQLNotification> {
+        match self {
+            Self::Notification { notification, .. } => Some(notification),
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Debug for NotificationEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
