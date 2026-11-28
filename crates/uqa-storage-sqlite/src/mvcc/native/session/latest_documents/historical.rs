@@ -51,7 +51,7 @@ impl NativeSnapshot {
         let documents = NativeRecordIdentity::new(super::Family::Documents, owner)?;
         let prefix = documents.encode_prefix(&[], control)?;
         let upper = crate::read_control::prefix_upper_bound(&prefix, control)?;
-        let result = snapshot.read_historical(|connection| {
+        let result = snapshot.read_historical(control, |connection| {
             if !stores_alone(connection, table, owner, control)? {
                 return Ok(None);
             }

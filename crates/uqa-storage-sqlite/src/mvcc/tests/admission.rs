@@ -88,6 +88,63 @@ fn after_physical_contention<T: Send>(
 }
 
 #[test]
+fn record_read_admission_pins_the_snapshot_before_visiting_once() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("read-admission.db");
+    let connection = ManagedConnection::open_auxiliary(&path, None).unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    for cancel in [false, true] {
+        let control = control();
+        let calls = AtomicUsize::new(0);
+        let result = after_physical_contention(
+            &path,
+            &store,
+            &control,
+            Holder::Exclusive,
+            cancel,
+            |connection| {
+                super::super::admission::read_header(
+                    connection,
+                    store.identity,
+                    None,
+                    &control,
+                    |read, header| {
+                        assert!(!read.is_autocommit());
+                        calls.fetch_add(1, Ordering::Relaxed);
+                        Ok(header.sequence)
+                    },
+                )
+            },
+        );
+        if cancel {
+            assert!(matches!(
+                result,
+                Err(Error::Version(VersionError::Cancelled(_)))
+            ));
+            assert_eq!(calls.load(Ordering::Relaxed), 0);
+        } else {
+            assert_eq!(result.unwrap(), uqa_storage::mvcc::CommitSequence::INITIAL);
+            assert_eq!(calls.load(Ordering::Relaxed), 1);
+        }
+    }
+    let control = control();
+    let mut visits = 0;
+    let result = store.read(&control, |_| {
+        visits += 1;
+        Err::<(), _>(
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_BUSY),
+                None,
+            )
+            .into(),
+        )
+    });
+    assert!(result.is_err());
+    assert_eq!(visits, 1);
+    assert!(store.snapshot(&control).is_ok());
+}
+
+#[test]
 fn transaction_and_identifier_admission_survive_a_rejected_busy_attempt() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("writer-admission.db");
@@ -404,7 +461,7 @@ fn record_write_scope_restores_pooled_timeout_after_error_and_unwind() {
             .unwrap();
         let mut calls = 0;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            store.with_write(&control, |connection| {
+            store.with_admission(&control, |connection| {
                 calls += 1;
                 assert_eq!(
                     connection

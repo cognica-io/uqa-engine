@@ -12,6 +12,79 @@ use uqa_core::memory::{BudgetedVec, MemoryReservation};
 use super::{CommittedRecordSnapshot, DatabaseId, RecordMetadata, VersionError, VersionResult};
 use crate::read_control::StorageReadControl;
 
+/// The first and latest revisions of an allocation namespace in a committed metadata generation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct IdentifierEpochHistory {
+    created: u64,
+    head: u64,
+}
+
+impl IdentifierEpochHistory {
+    pub fn new(created: u64, head: u64, current: u64) -> VersionResult<Self> {
+        if created > head || head > current {
+            return Err(VersionError::InvalidEncoding(
+                "invalid identifier metadata epochs",
+            ));
+        }
+        Ok(Self { created, head })
+    }
+
+    pub fn is_allocation(namespace: &[u8]) -> bool {
+        namespace != super::RECLAMATION_EPOCH_NAMESPACE
+            && !namespace.starts_with(super::RECLAMATION_DOMAIN_PREFIX)
+    }
+
+    /// Select the revision visible at the cut. A namespace created later contributes no record, and only a superseded head needs a predecessor lookup.
+    fn select<T, E>(
+        self,
+        cut: u64,
+        head: impl FnOnce() -> Result<T, E>,
+        previous: impl FnOnce(u64, u64) -> Result<T, E>,
+    ) -> Result<Option<T>, E> {
+        if self.created > cut {
+            Ok(None)
+        } else if self.head <= cut {
+            head().map(Some)
+        } else {
+            previous(self.created, cut).map(Some)
+        }
+    }
+
+    pub fn watermark_at<E: From<VersionError>>(
+        self,
+        cut: u64,
+        current: impl FnOnce() -> Result<u64, E>,
+        previous: impl FnOnce(u64, u64) -> Result<u64, E>,
+    ) -> Result<Option<u64>, E> {
+        // Only read the physical head after a visible revision has been selected.
+        let Some(retained) = self.select(
+            cut,
+            || Ok(None),
+            |from, through| previous(from, through).map(Some),
+        )?
+        else {
+            return Ok(None);
+        };
+        let current = current()?;
+        if retained.is_some_and(|value| value > current) {
+            return Err(VersionError::InvalidEncoding(
+                "identifier history exceeds its current watermark",
+            )
+            .into());
+        }
+        Ok(Some(retained.unwrap_or(current)))
+    }
+
+    pub fn retained_epoch<E>(
+        self,
+        cut: u64,
+        previous: impl FnOnce(u64, u64) -> Result<u64, E>,
+    ) -> Result<Option<u64>, E> {
+        self.select(cut, || Ok(self.head), previous)
+            .map(|epoch| epoch.filter(|epoch| *epoch > 0))
+    }
+}
+
 /// An owned scan boundary charged to the backup read allowance.
 pub type BackupCursorKey = BudgetedVec<u8>;
 
@@ -181,6 +254,16 @@ impl MetadataEpoch {
 
     pub const fn as_u64(self) -> u64 {
         self.0
+    }
+
+    pub fn reclamation_horizon(current: u64, oldest: Option<Self>) -> VersionResult<u64> {
+        let horizon = oldest.map_or(current, Self::as_u64);
+        if horizon > current {
+            return Err(VersionError::InvalidEncoding(
+                "metadata lease exceeds the current epoch",
+            ));
+        }
+        Ok(horizon)
     }
 
     pub fn successor(self) -> VersionResult<Self> {

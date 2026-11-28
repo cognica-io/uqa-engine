@@ -164,7 +164,7 @@ fn a_validated_connection_is_validated_again_for_a_store_that_expects_another_da
     };
     for _ in 0..2 {
         assert!(matches!(
-            stranger.read(|_| Ok(())),
+            stranger.read(&control, |_| Ok(())),
             Err(VersionError::WrongDatabase)
         ));
     }

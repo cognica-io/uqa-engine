@@ -105,19 +105,33 @@ impl SQLiteInvertedIndex {
             params![self.table.as_str(), doc_id, field], |row| row.get(0),
         ).optional()?;
         bytes
-            .map(|bytes| {
-                let metadata = clustered_result(IndexedFieldMetadata::from_bytes(&bytes))?;
-                let stored = self.stored_field_stats_on(conn, field)?.ok_or_else(|| {
-                    SQLiteError::StorageBackend("indexed field revision is missing".into())
-                })?;
-                if stored.revision != metadata.revision() {
-                    return Err(SQLiteError::StorageBackend(
-                        "indexed field revisions disagree".into(),
-                    ));
-                }
-                Ok(metadata)
-            })
+            .map(|bytes| self.decode_field_metadata_on(conn, field, &bytes, &mut None))
             .transpose()
+    }
+
+    pub(super) fn decode_field_metadata_on(
+        &self,
+        conn: &rusqlite::Connection,
+        field: &str,
+        bytes: &[u8],
+        revision: &mut Option<IndexedFieldRevision>,
+    ) -> SQLiteResult<IndexedFieldMetadata> {
+        let metadata = clustered_result(IndexedFieldMetadata::from_bytes(bytes))?;
+        let expected = if let Some(expected) = *revision {
+            expected
+        } else {
+            let stats = self.stored_field_stats_on(conn, field)?.ok_or_else(|| {
+                SQLiteError::StorageBackend("indexed field revision is missing".into())
+            })?;
+            *revision = Some(stats.revision);
+            stats.revision
+        };
+        if expected != metadata.revision() {
+            return Err(SQLiteError::StorageBackend(
+                "indexed field revisions disagree".into(),
+            ));
+        }
+        Ok(metadata)
     }
 
     pub(super) fn old_document_on(

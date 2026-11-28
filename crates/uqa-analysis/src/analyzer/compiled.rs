@@ -32,6 +32,64 @@ pub struct CompiledAnalyzer {
     pub(super) kuromoji_dictionaries: Vec<Arc<crate::kuromoji::ResolvedDictionary>>,
 }
 
+fn analyze_prepared(
+    text: &str,
+    budget: &MemoryBudget,
+    char_filters: &[PreparedCharFilter<'_>],
+    tokenizer: &PreparedTokenizer,
+    token_filters: &[PreparedTokenFilter<'_>],
+    mut poll: impl FnMut() -> AnalysisResult<()>,
+) -> AnalysisResult<Budgeted<AnalyzedText>> {
+    poll()?;
+    let mut filtered = FilteredText::new(text);
+    for filter in char_filters {
+        filtered = filter.filter_mapped_budgeted(filtered, budget, &mut poll)?;
+    }
+    let mut tokens =
+        tokenizer.tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
+    drop(filtered);
+    for filter in token_filters {
+        tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
+    }
+    #[cfg(feature = "kuromoji")]
+    if matches!(tokenizer, PreparedTokenizer::Kuromoji(_)) {
+        tokens.validate_japanese_attributes(&mut poll)?;
+    }
+    poll()?;
+    Ok(tokens)
+}
+
+/// Prepare the standard tokenizer and filters once for repeated term extraction. This lightweight pipeline owns the same stop words and stemming rules as `standard_analyzer`.
+pub fn standard_term_analyzer(
+    language: &str,
+) -> AnalysisResult<impl Fn(&str) -> AnalysisResult<Vec<String>>> {
+    let config = super::standard_analyzer(language);
+    let char_filters = config
+        .char_filters
+        .iter()
+        .map(|filter| crate::work::inline(filter.prepare()?.into_owned_with(&mut ())))
+        .collect::<AnalysisResult<Vec<_>>>()?;
+    let tokenizer = config.tokenizer.prepare()?;
+    let filters = config
+        .token_filters
+        .iter()
+        .map(|filter| crate::work::inline(filter.prepare()?.into_owned_with(&mut ())))
+        .collect::<AnalysisResult<Vec<_>>>()?;
+    Ok(move |text: &str| {
+        analyze_prepared(
+            text,
+            &MemoryBudget::new(usize::MAX),
+            &char_filters,
+            &tokenizer,
+            &filters,
+            || Ok(()),
+        )?
+        .into_parts()
+        .0
+        .into_terms()
+    })
+}
+
 impl Analyzer {
     /// Resolve immutable inputs and reuse prepared stages with the default resource owner.
     ///
@@ -213,24 +271,14 @@ impl CompiledAnalyzer {
         budget: &MemoryBudget,
         mut poll: impl FnMut() -> AnalysisResult<()>,
     ) -> AnalysisResult<Budgeted<AnalyzedText>> {
-        poll()?;
-        let mut filtered = FilteredText::new(text);
-        for filter in &self.char_filters {
-            filtered = filter.filter_mapped_budgeted(filtered, budget, &mut poll)?;
-        }
-        let mut tokens = self
-            .tokenizer
-            .tokenize_mapped_for_filters_budgeted(&filtered, budget, &mut poll)?;
-        drop(filtered);
-        for filter in &self.token_filters {
-            tokens = filter.filter_analyzed_budgeted(tokens, &mut poll)?;
-        }
-        #[cfg(feature = "kuromoji")]
-        if matches!(self.tokenizer, PreparedTokenizer::Kuromoji(_)) {
-            tokens.validate_japanese_attributes(&mut poll)?;
-        }
-        poll()?;
-        Ok(tokens)
+        analyze_prepared(
+            text,
+            budget,
+            &self.char_filters,
+            &self.tokenizer,
+            &self.token_filters,
+            &mut poll,
+        )
     }
 
     pub fn analyze(&self, text: &str) -> AnalysisResult<Vec<String>> {

@@ -24,6 +24,27 @@ fn fingerprint(
 }
 
 #[test]
+fn opening_format_69_preserves_existing_fingerprints_and_writes_the_next_revision() {
+    let connection = ManagedConnection::open_in_memory().unwrap();
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let control = control();
+    let first = write(&store, b"old", None, &control);
+    let original = fingerprint(capture(&store, &control).as_ref(), &control).unwrap();
+    downgrade_record_format(&store, 69);
+    drop(store);
+    let store = SQLiteRecordStore::new(&connection).unwrap();
+    let before_update = capture(&store, &control);
+    write(&store, b"new", Some(first), &control);
+    assert_eq!(
+        fingerprint(before_update.as_ref(), &control),
+        Some(original)
+    );
+    let current = fingerprint(capture(&store, &control).as_ref(), &control).unwrap();
+    assert_ne!(current.digest, original.digest);
+    assert_eq!(current.decoded_bytes, original.decoded_bytes);
+}
+
+#[test]
 fn fingerprint_metadata_tracks_visible_revisions_and_upgrades_without_reading_old_payloads() {
     let connection = ManagedConnection::open_in_memory().unwrap();
     let store = SQLiteRecordStore::new(&connection).unwrap();

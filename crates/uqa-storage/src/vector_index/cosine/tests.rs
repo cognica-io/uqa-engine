@@ -81,3 +81,36 @@ fn controlled_cosine_observes_cancellation_inside_a_long_vector_and_before_empty
         assert_eq!(cosine_similarity(a, b), 0.0);
     }
 }
+
+#[test]
+fn cached_norms_preserve_every_canonical_score_bit() {
+    let cases = [
+        vec![],
+        vec![0.0, -0.0],
+        vec![1.0, 0.0],
+        vec![0.0, 1.0],
+        vec![-2.0, 3.0],
+        vec![0.6, 0.8],
+        vec![f32::MAX, f32::MAX],
+        vec![-f32::MAX, 1.0],
+        vec![f32::MIN_POSITIVE, f32::from_bits(1)],
+        vec![3.0, 4.0, 1.0],
+        vec![f32::MAX; 1025],
+        vec![1.0; 1025],
+        vec![-1.0; 1025],
+    ];
+    for a in &cases {
+        for b in &cases {
+            let expected = cosine_similarity(a, b).to_bits();
+            let norm_a = vector_norm(a);
+            assert_eq!(
+                cosine_similarity_with_query_norm(a, b, norm_a).to_bits(),
+                expected
+            );
+            assert_eq!(
+                cosine_similarity_with_norms(a, b, norm_a, vector_norm(b)).to_bits(),
+                expected
+            );
+        }
+    }
+}

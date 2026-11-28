@@ -6,10 +6,12 @@
 
 //! DFA-backed regular path reachability.
 
+use std::sync::Arc;
+
 use super::{
-    build_nfa, simplify, subset_construction, BTreeMap, BTreeSet, Dfa, DfaState, DocId,
-    GraphPayload, GraphPostingList, GraphStore, GraphStoreError, GraphStoreResult, Payload,
-    PostingEntry, PostingList, RegularPathExpr, VecDeque, VertexId, DEFAULT_GRAPH_SCORE,
+    BTreeMap, BTreeSet, CompiledDfa, DocId, GraphPayload, GraphPostingList, GraphStore,
+    GraphStoreError, GraphStoreResult, Payload, PostingEntry, PostingList, RegularPathExpr,
+    StateId, VecDeque, VertexId, DEFAULT_GRAPH_SCORE,
 };
 
 /// `RPQ_R` (Definition 5.1.2): evaluate a regular path expression over
@@ -45,13 +47,8 @@ impl<'a> RegularPathQuery<'a> {
     }
 
     pub fn execute<G: GraphStore>(&self, store: &G) -> GraphStoreResult<GraphPostingList> {
-        let simplified = simplify(&self.path)
+        let dfa = CompiledDfa::from_path(&self.path)
             .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
-        let nfa = build_nfa(&simplified)
-            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
-        let dfa = subset_construction(&nfa)
-            .map_err(|error| GraphStoreError::InvalidQuery(error.to_string()))?;
-
         let starts: Vec<VertexId> = match self.start_vertex {
             Some(v) => {
                 store.require_vertex_in_graph(v, self.graph)?;
@@ -66,6 +63,7 @@ impl<'a> RegularPathQuery<'a> {
         }
 
         let mut entries: Vec<PostingEntry> = Vec::new();
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         let mut seen: BTreeSet<DocId> = BTreeSet::new();
         for (start_v, end_v) in &pairs {
@@ -78,9 +76,9 @@ impl<'a> RegularPathQuery<'a> {
                 graph_payloads.insert(
                     doc_id,
                     GraphPayload {
-                        subgraph_vertices,
-                        subgraph_edges: Vec::new(),
-                        graph_name: self.graph.to_string(),
+                        subgraph_vertices: subgraph_vertices.into(),
+                        subgraph_edges: Arc::default(),
+                        graph_name: Arc::clone(&graph_name),
                         score_override: Some(self.score),
                     },
                 );
@@ -98,35 +96,33 @@ impl<'a> RegularPathQuery<'a> {
         &self,
         store: &G,
         start: VertexId,
-        dfa: &Dfa,
+        dfa: &CompiledDfa,
         pairs: &mut BTreeSet<(VertexId, VertexId)>,
     ) -> GraphStoreResult<()> {
-        let mut visited: BTreeSet<(VertexId, DfaState)> = BTreeSet::new();
-        let mut queue: VecDeque<(VertexId, DfaState)> = VecDeque::new();
-        queue.push_back((start, dfa.start.clone()));
-        visited.insert((start, dfa.start.clone()));
+        let mut visited: BTreeSet<(VertexId, StateId)> = BTreeSet::new();
+        let mut queue: VecDeque<(VertexId, StateId)> = VecDeque::new();
+        queue.push_back((start, CompiledDfa::START));
+        visited.insert((start, CompiledDfa::START));
 
-        if dfa.accepts.contains(&dfa.start) {
+        if dfa.accepting(CompiledDfa::START) {
             pairs.insert((start, start));
         }
 
         while let Some((vertex, state)) = queue.pop_front() {
-            let Some(transitions) = dfa.transitions.get(&state) else {
-                continue;
-            };
+            let transitions = dfa.transitions(state);
             for eid in store.out_edge_ids(vertex, self.graph)? {
                 let edge = store.get_edge(eid)?.ok_or_else(|| {
                     GraphStoreError::CorruptGraph(format!("missing RPQ edge {eid}"))
                 })?;
-                let Some(next_state) = transitions.get(&edge.label) else {
+                let Some(&next_state) = transitions.get(&edge.label) else {
                     continue;
                 };
                 let neighbor = edge.target_id;
-                if dfa.accepts.contains(next_state) {
+                if dfa.accepting(next_state) {
                     pairs.insert((start, neighbor));
                 }
-                let key = (neighbor, next_state.clone());
-                if visited.insert(key.clone()) {
+                let key = (neighbor, next_state);
+                if visited.insert(key) {
                     queue.push_back(key);
                 }
             }

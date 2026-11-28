@@ -13,20 +13,21 @@
 //! generic posting-list payload merges remain a separate contract.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use uqa_core::types::{
     GraphPhiEnvelope, GraphPhiPayload, GRAPH_PHI_EDGES_FIELD, GRAPH_PHI_FIELD,
     GRAPH_PHI_VERTICES_FIELD,
 };
-use uqa_core::{DocId, EdgeId, PostingEntry, PostingList, Value, VertexId};
+use uqa_core::{DocId, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
 
 /// Auxiliary payload for graph posting list entries: the subgraph each
 /// matched entry refers to, plus a graph-name tag and a score override.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GraphPayload {
-    pub subgraph_vertices: Vec<VertexId>,
-    pub subgraph_edges: Vec<EdgeId>,
-    pub graph_name: String,
+    pub subgraph_vertices: Arc<[VertexId]>,
+    pub subgraph_edges: Arc<[EdgeId]>,
+    pub graph_name: Arc<str>,
     /// `Some(score)` overrides the underlying posting list's payload
     /// score during `Phi`. `None` keeps the standard payload score.
     pub score_override: Option<f64>,
@@ -80,6 +81,56 @@ impl GraphPostingList {
         Self::default()
     }
 
+    /// Attach one immutable subgraph to every entry, preserving each entry's score.
+    pub(crate) fn with_shared_subgraph(
+        inner: PostingList,
+        subgraph_vertices: Arc<[VertexId]>,
+        subgraph_edges: Arc<[EdgeId]>,
+        graph_name: Arc<str>,
+    ) -> Self {
+        let shared = GraphPayload {
+            subgraph_vertices,
+            subgraph_edges,
+            graph_name,
+            score_override: None,
+        };
+        let graph_payloads = inner
+            .iter()
+            .map(|entry| {
+                (
+                    entry.doc_id,
+                    GraphPayload {
+                        score_override: Some(entry.payload.score),
+                        ..shared.clone()
+                    },
+                )
+            })
+            .collect();
+        Self {
+            inner,
+            graph_payloads,
+        }
+    }
+
+    pub(crate) fn from_traversal(
+        vertices: BTreeSet<VertexId>,
+        edges: BTreeSet<EdgeId>,
+        graph: &str,
+        score: f64,
+    ) -> Self {
+        let vertices: Arc<[VertexId]> = vertices.into_iter().collect();
+        let entries = vertices
+            .iter()
+            .map(|&id| PostingEntry::new(id, Payload::with_score(score)))
+            .collect();
+        Self::with_shared_subgraph(
+            PostingList::from_sorted_unchecked(entries),
+            vertices,
+            edges.into_iter().collect(),
+            graph.into(),
+        )
+    }
+
     /// Construct a graph posting list while enforcing that every side-table
     /// key belongs to the underlying posting support.
     pub fn try_from_parts(
@@ -120,9 +171,9 @@ impl GraphPostingList {
                 let original_vertices = payload.fields.remove(GRAPH_PHI_VERTICES_FIELD);
                 let original_edges = payload.fields.remove(GRAPH_PHI_EDGES_FIELD);
                 let encoded_graph = graph_payload.map(|gp| GraphPhiPayload {
-                    vertices: gp.subgraph_vertices.clone(),
-                    edges: gp.subgraph_edges.clone(),
-                    graph_name: gp.graph_name.clone(),
+                    vertices: gp.subgraph_vertices.to_vec(),
+                    edges: gp.subgraph_edges.to_vec(),
+                    graph_name: gp.graph_name.to_string(),
                 });
 
                 if let Some(graph) = &encoded_graph {
@@ -197,9 +248,9 @@ impl GraphPostingList {
                     graph_payloads.insert(
                         entry.doc_id,
                         GraphPayload {
-                            subgraph_vertices: graph.vertices,
-                            subgraph_edges: graph.edges,
-                            graph_name: graph.graph_name,
+                            subgraph_vertices: graph.vertices.into(),
+                            subgraph_edges: graph.edges.into(),
+                            graph_name: graph.graph_name.into(),
                             score_override: envelope.score_override,
                         },
                     );
@@ -224,9 +275,9 @@ impl GraphPostingList {
                 graph_payloads.insert(
                     entry.doc_id,
                     GraphPayload {
-                        subgraph_vertices: vertices,
-                        subgraph_edges: edges,
-                        graph_name: String::new(),
+                        subgraph_vertices: vertices.into(),
+                        subgraph_edges: edges.into(),
+                        graph_name: Arc::default(),
                         score_override: Some(entry.payload.score),
                     },
                 );
@@ -399,11 +450,15 @@ fn merge_graph_payload(
     })
 }
 
-fn compatible_graph_name(doc_id: DocId, left: &str, right: &str) -> GraphPostingListResult<String> {
+fn compatible_graph_name(
+    doc_id: DocId,
+    left: &Arc<str>,
+    right: &Arc<str>,
+) -> GraphPostingListResult<Arc<str>> {
     if left == right || right.is_empty() {
-        Ok(left.to_string())
+        Ok(Arc::clone(left))
     } else if left.is_empty() {
-        Ok(right.to_string())
+        Ok(Arc::clone(right))
     } else {
         Err(GraphPostingListError::ConflictingGraphNames {
             doc_id,
@@ -413,7 +468,7 @@ fn compatible_graph_name(doc_id: DocId, left: &str, right: &str) -> GraphPosting
     }
 }
 
-fn set_union<T: Copy + Ord>(left: &[T], right: &[T]) -> Vec<T> {
+fn set_union<T: Copy + Ord>(left: &[T], right: &[T]) -> Arc<[T]> {
     left.iter()
         .chain(right)
         .copied()
@@ -422,7 +477,7 @@ fn set_union<T: Copy + Ord>(left: &[T], right: &[T]) -> Vec<T> {
         .collect()
 }
 
-fn set_intersection<T: Copy + Ord>(left: &[T], right: &[T]) -> Vec<T> {
+fn set_intersection<T: Copy + Ord>(left: &[T], right: &[T]) -> Arc<[T]> {
     let right: BTreeSet<_> = right.iter().copied().collect();
     left.iter()
         .copied()

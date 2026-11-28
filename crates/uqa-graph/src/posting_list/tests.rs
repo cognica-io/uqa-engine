@@ -21,8 +21,8 @@ fn fixture(doc_id: DocId, vertices: Vec<VertexId>, edges: Vec<EdgeId>) -> GraphP
     gpl.try_set_graph_payload(
         doc_id,
         GraphPayload {
-            subgraph_vertices: vertices,
-            subgraph_edges: edges,
+            subgraph_vertices: vertices.into(),
+            subgraph_edges: edges.into(),
             ..GraphPayload::default()
         },
     )
@@ -106,8 +106,8 @@ fn round_trip_preserves_the_complete_payload_and_reserved_collisions() {
     graph_payloads.insert(
         7,
         GraphPayload {
-            subgraph_vertices: vec![u64::MAX, 3, 3],
-            subgraph_edges: vec![9, u64::MAX - 1],
+            subgraph_vertices: [u64::MAX, 3, 3].into(),
+            subgraph_edges: [9, u64::MAX - 1].into(),
             graph_name: "knowledge.prod".into(),
             score_override: Some(-7.5),
         },
@@ -115,8 +115,8 @@ fn round_trip_preserves_the_complete_payload_and_reserved_collisions() {
     graph_payloads.insert(
         8,
         GraphPayload {
-            subgraph_vertices: vec![8],
-            subgraph_edges: Vec::new(),
+            subgraph_vertices: [8].into(),
+            subgraph_edges: Arc::default(),
             graph_name: "no-override".into(),
             score_override: None,
         },
@@ -163,8 +163,8 @@ fn round_trip_preserves_ids_above_signed_bigint_range() {
     let gpl = fixture(7, vec![u64::MAX], vec![u64::MAX - 1]);
     let restored = GraphPostingList::from_posting_list(&gpl.to_posting_list());
     let payload = restored.get_graph_payload(7).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![u64::MAX]);
-    assert_eq!(payload.subgraph_edges, vec![u64::MAX - 1]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[u64::MAX]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[u64::MAX - 1]);
 }
 
 #[test]
@@ -175,12 +175,20 @@ fn union_combines_disjoint_support() {
     let ids: Vec<DocId> = merged.inner().doc_ids().collect();
     assert_eq!(ids, vec![1, 2]);
     assert_eq!(
-        merged.get_graph_payload(1).unwrap().subgraph_vertices,
-        vec![1]
+        merged
+            .get_graph_payload(1)
+            .unwrap()
+            .subgraph_vertices
+            .as_ref(),
+        &[1]
     );
     assert_eq!(
-        merged.get_graph_payload(2).unwrap().subgraph_vertices,
-        vec![2]
+        merged
+            .get_graph_payload(2)
+            .unwrap()
+            .subgraph_vertices
+            .as_ref(),
+        &[2]
     );
 }
 
@@ -193,13 +201,13 @@ fn default_overlap_policies_apply_set_union_and_intersection() {
     let ids: Vec<DocId> = merged.inner().doc_ids().collect();
     assert_eq!(ids, vec![1]);
     let payload = merged.get_graph_payload(1).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![1, 2, 3]);
-    assert_eq!(payload.subgraph_edges, vec![10, 20, 30]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[1, 2, 3]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[10, 20, 30]);
 
     let merged = a.merge_intersection(&b).unwrap();
     let payload = merged.get_graph_payload(1).unwrap();
-    assert_eq!(payload.subgraph_vertices, vec![3]);
-    assert_eq!(payload.subgraph_edges, vec![20]);
+    assert_eq!(payload.subgraph_vertices.as_ref(), &[3]);
+    assert_eq!(payload.subgraph_edges.as_ref(), &[20]);
 }
 
 #[test]
@@ -208,8 +216,8 @@ fn graph_name_conflicts_require_an_explicit_precedence_policy() {
     left.try_set_graph_payload(
         1,
         GraphPayload {
-            subgraph_vertices: vec![1],
-            subgraph_edges: vec![10],
+            subgraph_vertices: [1].into(),
+            subgraph_edges: [10].into(),
             graph_name: "left".into(),
             score_override: None,
         },
@@ -220,8 +228,8 @@ fn graph_name_conflicts_require_an_explicit_precedence_policy() {
         .try_set_graph_payload(
             1,
             GraphPayload {
-                subgraph_vertices: vec![2],
-                subgraph_edges: vec![20],
+                subgraph_vertices: [2].into(),
+                subgraph_edges: [20].into(),
                 graph_name: "right".into(),
                 score_override: None,
             },
@@ -242,8 +250,8 @@ fn graph_name_conflicts_require_an_explicit_precedence_policy() {
     assert_eq!(
         merged.get_graph_payload(1),
         Some(&GraphPayload {
-            subgraph_vertices: vec![2],
-            subgraph_edges: vec![20],
+            subgraph_vertices: [2].into(),
+            subgraph_edges: [20].into(),
             graph_name: "right".into(),
             score_override: None,
         })
@@ -270,8 +278,8 @@ fn generic_posting_merge_retains_its_right_precedence_codec_contract() {
     a.try_set_graph_payload(
         1,
         GraphPayload {
-            subgraph_vertices: vec![1],
-            subgraph_edges: vec![10],
+            subgraph_vertices: [1].into(),
+            subgraph_edges: [10].into(),
             graph_name: "left".into(),
             score_override: None,
         },
@@ -298,8 +306,8 @@ fn generic_posting_merge_retains_its_right_precedence_codec_contract() {
     b.try_set_graph_payload(
         1,
         GraphPayload {
-            subgraph_vertices: vec![2],
-            subgraph_edges: vec![20],
+            subgraph_vertices: [2].into(),
+            subgraph_edges: [20].into(),
             graph_name: "right".into(),
             score_override: Some(5.0),
         },
@@ -325,8 +333,8 @@ fn generic_posting_merge_retains_its_right_precedence_codec_contract() {
         assert_eq!(
             decoded.get_graph_payload(1),
             Some(&GraphPayload {
-                subgraph_vertices: vec![2],
-                subgraph_edges: vec![20],
+                subgraph_vertices: [2].into(),
+                subgraph_edges: [20].into(),
                 graph_name: "right".into(),
                 score_override: Some(6.0),
             })
@@ -346,8 +354,8 @@ fn payload_overlap_keeps_none_override_when_both_inputs_use_base_scores() {
     b.try_set_graph_payload(
         1,
         GraphPayload {
-            subgraph_vertices: vec![2],
-            subgraph_edges: vec![20],
+            subgraph_vertices: [2].into(),
+            subgraph_edges: [20].into(),
             ..GraphPayload::default()
         },
     )
@@ -356,12 +364,16 @@ fn payload_overlap_keeps_none_override_when_both_inputs_use_base_scores() {
     assert_eq!(merged.inner().get_entry(1).unwrap().payload.score, 3.0);
     assert_eq!(merged.get_graph_payload(1).unwrap().score_override, None);
     assert_eq!(
-        merged.get_graph_payload(1).unwrap().subgraph_vertices,
-        vec![1, 2]
+        merged
+            .get_graph_payload(1)
+            .unwrap()
+            .subgraph_vertices
+            .as_ref(),
+        &[1, 2]
     );
     assert_eq!(
-        merged.get_graph_payload(1).unwrap().subgraph_edges,
-        vec![10, 20]
+        merged.get_graph_payload(1).unwrap().subgraph_edges.as_ref(),
+        &[10, 20]
     );
     assert_eq!(
         merged.to_posting_list().get_entry(1).unwrap().payload.score,
@@ -380,8 +392,8 @@ fn payload_overlap_with_plain_payload_keeps_graph_and_effective_score() {
         .try_set_graph_payload(
             1,
             GraphPayload {
-                subgraph_vertices: vec![1],
-                subgraph_edges: vec![7],
+                subgraph_vertices: [1].into(),
+                subgraph_edges: [7].into(),
                 graph_name: "left".into(),
                 score_override: Some(4.0),
             },
@@ -399,8 +411,8 @@ fn payload_overlap_with_plain_payload_keeps_graph_and_effective_score() {
         assert_eq!(
             merged.get_graph_payload(1),
             Some(&GraphPayload {
-                subgraph_vertices: vec![1],
-                subgraph_edges: vec![7],
+                subgraph_vertices: [1].into(),
+                subgraph_edges: [7].into(),
                 graph_name: "left".into(),
                 score_override: Some(6.0),
             })
@@ -504,9 +516,9 @@ fn legacy_encoding_remains_readable() {
     assert_eq!(
         decoded.get_graph_payload(5),
         Some(&GraphPayload {
-            subgraph_vertices: vec![3, u64::MAX],
-            subgraph_edges: vec![8],
-            graph_name: String::new(),
+            subgraph_vertices: [3, u64::MAX].into(),
+            subgraph_edges: [8].into(),
+            graph_name: Arc::default(),
             score_override: Some(9.0),
         })
     );
@@ -552,8 +564,8 @@ fn difference_preserves_the_surviving_left_payload_exactly() {
     left.try_set_graph_payload(
         1,
         GraphPayload {
-            subgraph_vertices: vec![1, 1],
-            subgraph_edges: vec![u64::MAX],
+            subgraph_vertices: [1, 1].into(),
+            subgraph_edges: [u64::MAX].into(),
             graph_name: "left".into(),
             score_override: Some(12.0),
         },

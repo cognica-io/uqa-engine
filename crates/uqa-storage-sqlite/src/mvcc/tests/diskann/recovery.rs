@@ -18,63 +18,57 @@ const NATIVE_ENV: &str = "UQA_DISKANN_PUBLICATION_NATIVE";
 const COMMITTED_ENV: &str = "UQA_DISKANN_PUBLICATION_COMMITTED";
 
 #[test]
-fn diskann_publication_process_loss_recovers_complete_sqlite_generations_and_cleanup() {
-    if let Some(path) = std::env::var_os(PATH_ENV) {
-        let connection = connection(
-            Path::new(&path),
-            std::env::var(MODE_ENV).unwrap().parse().unwrap(),
-        );
-        let (backend, _) = backend(&connection, std::env::var(NATIVE_ENV).unwrap() == "true");
-        diskann_rebuild_until_process_loss(
-            &*backend,
-            std::env::var(COMMITTED_ENV).unwrap() == "true",
-        )
+#[ignore = "subprocess entry point for DiskANN publication recovery"]
+fn diskann_publication_peer() {
+    let path = std::env::var_os(PATH_ENV).unwrap();
+    let connection = connection(
+        Path::new(&path),
+        std::env::var(MODE_ENV).unwrap().parse().unwrap(),
+    );
+    let (backend, _) = backend(&connection, std::env::var(NATIVE_ENV).unwrap() == "true");
+    diskann_rebuild_until_process_loss(&*backend, std::env::var(COMMITTED_ENV).unwrap() == "true")
         .unwrap();
-        return;
-    }
-    let (_, test) = concat!(
-        module_path!(),
-        "::diskann_publication_process_loss_recovers_complete_sqlite_generations_and_cleanup"
+}
+
+#[rstest::rstest]
+fn diskann_publication_process_loss_recovers_complete_sqlite_generations_and_cleanup(
+    #[values(0, 1, 2, 3)] mode: u8,
+    #[values(false, true)] native: bool,
+    #[values(false, true)] committed: bool,
+) {
+    let (_, child) = concat!(module_path!(), "::diskann_publication_peer")
+        .split_once("::")
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("publication-process.db");
+    let previous = {
+        let connection = connection(&path, mode);
+        let (backend, _) = backend(&connection, native);
+        verify_diskann_restore_source(&*backend).unwrap()
+    };
+    kill_diskann_publication_owner(
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", child, "--ignored", "--nocapture"])
+            .env(PATH_ENV, &path)
+            .env(MODE_ENV, mode.to_string())
+            .env(NATIVE_ENV, native.to_string())
+            .env(COMMITTED_ENV, committed.to_string()),
     )
-    .split_once("::")
     .unwrap();
-    for mode in 0..4 {
-        for native in [false, true] {
-            for committed in [false, true] {
-                let directory = tempfile::tempdir().unwrap();
-                let path = directory.path().join("publication-process.db");
-                let previous = {
-                    let connection = connection(&path, mode);
-                    let (backend, _) = backend(&connection, native);
-                    verify_diskann_restore_source(&*backend).unwrap()
-                };
-                kill_diskann_publication_owner(
-                    Command::new(std::env::current_exe().unwrap())
-                        .args(["--exact", test, "--nocapture"])
-                        .env(PATH_ENV, &path)
-                        .env(MODE_ENV, mode.to_string())
-                        .env(NATIVE_ENV, native.to_string())
-                        .env(COMMITTED_ENV, committed.to_string()),
-                )
-                .unwrap();
-                let generation = {
-                    let connection = connection(&path, mode);
-                    let (backend, records) = backend(&connection, native);
-                    let generation =
-                        verify_diskann_recovered_publication(&*backend, previous, committed)
-                            .unwrap();
-                    backend.reclaim_obsolete().unwrap();
-                    verify_diskann_recovered_records(&*records, generation).unwrap();
-                    generation
-                };
-                let reopened = connection(&path, mode);
-                let (backend, records) = backend(&reopened, native);
-                assert_eq!(
-                    verify_diskann_recovered_publication(&*backend, previous, committed).unwrap(),
-                    generation
-                );
-                verify_diskann_recovered_records(&*records, generation).unwrap();
-            }
-        }
-    }
+    let generation = {
+        let connection = connection(&path, mode);
+        let (backend, records) = backend(&connection, native);
+        let generation =
+            verify_diskann_recovered_publication(&*backend, previous, committed).unwrap();
+        backend.reclaim_obsolete().unwrap();
+        verify_diskann_recovered_records(&*records, generation).unwrap();
+        generation
+    };
+    let reopened = connection(&path, mode);
+    let (backend, records) = backend(&reopened, native);
+    assert_eq!(
+        verify_diskann_recovered_publication(&*backend, previous, committed).unwrap(),
+        generation
+    );
+    verify_diskann_recovered_records(&*records, generation).unwrap();
 }

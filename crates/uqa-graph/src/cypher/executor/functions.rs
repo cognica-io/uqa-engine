@@ -9,11 +9,11 @@
 use super::{
     agtype, domain_float_fn, exact_i64_to_f64, float_fn, is_aggregate_name, nonnegative_i64_to_u64,
     nonnegative_i64_to_usize, string_fn, trunc_f64_to_i64, unsupported_argument, usize_to_i64,
-    validated_path_elements, BindingRow, CypherError, CypherExecutor, FunctionCall, GraphStore,
+    validated_path_elements, BindingRow, CypherError, FunctionCall, GraphStore, StatementReader,
     Value,
 };
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     #[expect(
         clippy::too_many_lines,
         reason = "preserves exhaustive Cypher dispatch"

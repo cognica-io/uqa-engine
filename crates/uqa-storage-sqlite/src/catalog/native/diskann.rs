@@ -7,10 +7,9 @@
 //! Native catalog selection stays on the canonical snapshot and guards its real physical records.
 
 use rusqlite::types::ValueRef;
-use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
-    diskann_index::catalog,
-    key_value::{KeyValueRead, KeyValueReadRevision},
+    diskann_index::catalog::{self, DiskANNCatalogRecord},
+    key_value::KeyValueRead,
     mvcc::VersionError,
     read_control::StorageReadControl,
     vector_index::DiskANNIndexParams,
@@ -29,9 +28,8 @@ pub(crate) struct DiskANNCatalogBinding {
 }
 
 struct Record {
-    key: BudgetedVec<u8>,
+    observed: DiskANNCatalogRecord,
     identity: Identity,
-    revision: KeyValueReadRevision,
 }
 
 impl DiskANNCatalogBinding {
@@ -60,7 +58,7 @@ impl DiskANNCatalogBinding {
                 resolver,
                 (identity, generation),
                 definition,
-                &record.revision,
+                record.observed.revision(),
                 &snapshot.control,
                 capture,
                 control,
@@ -78,11 +76,9 @@ impl DiskANNCatalogBinding {
     ) -> StorageBackendResult<Self> {
         snapshot.control.check()?;
         control.check()?;
-        let relation =
-            RelationIdentity::from_legacy_name(table).map_err(StorageBackendError::Other)?;
-        if relation.qualified_name() != table || relation.schema != index.schema {
-            return Err(invalid("index and canonical table names do not match"));
-        }
+        let relation = catalog::bound_relation(table, index, || {
+            invalid("index and canonical table names do not match")
+        })?;
         let database = Owner::Database(snapshot.database);
         let name = Record::capture(
             snapshot,
@@ -150,14 +146,13 @@ impl DiskANNCatalogBinding {
         batch: &mut dyn KeyValueBatch,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        for record in &self.records {
-            control.check()?;
-            if read.record_revision(&record.key)?.as_ref() != Some(&record.revision) {
-                return Err(invalid("table or index changed since build capture"));
-            }
-            batch.require_unchanged(&record.key)?;
-        }
-        control.check()
+        catalog::require_current_records(
+            self.records.iter().map(|record| &record.observed),
+            read,
+            batch,
+            control,
+            || invalid("table or index changed since build capture"),
+        )
     }
 }
 
@@ -173,15 +168,10 @@ impl Record {
         let key = identity
             .encode_key(components, control)
             .map_err(VersionError::into_storage_error)?;
-        let revision = snapshot
-            .record_read()
-            .record_revision(&key)?
-            .ok_or_else(|| invalid("native catalog record is missing"))?;
-        Ok(Self {
-            key,
-            identity,
-            revision,
-        })
+        let observed = DiskANNCatalogRecord::capture(&snapshot.record_read(), key, || {
+            invalid("native catalog record is missing")
+        })?;
+        Ok(Self { observed, identity })
     }
 
     fn read<T>(
@@ -194,12 +184,12 @@ impl Record {
         control.check()?;
         let mut result = None;
         snapshot.record_read().visit_value_bounded(
-            &self.key,
+            self.observed.key(),
             control.memory().limit(),
             control,
             &mut |value| {
                 let bytes = value.ok_or_else(|| invalid("native catalog record is missing"))?;
-                let (identity, row) = decode_record(&self.key, bytes, control)
+                let (identity, row) = decode_record(self.observed.key(), bytes, control)
                     .map_err(VersionError::into_storage_error)?;
                 if identity != self.identity {
                     return Err(invalid("native catalog record has another owner"));

@@ -37,20 +37,25 @@ use hmac::{Hmac, Mac};
 use rusqlite::ffi;
 use sha2::Sha256;
 
+/// The single-process browser VFS uses the same fallible lock interface as native files.
 #[cfg(target_os = "emscripten")]
-struct FileExt;
+trait FileExt {
+    fn try_lock_exclusive(&self) -> std::io::Result<()>;
+    fn try_lock_shared(&self) -> std::io::Result<()>;
+    fn unlock(&self) -> std::io::Result<()>;
+}
 
 #[cfg(target_os = "emscripten")]
-impl FileExt {
-    fn try_lock_exclusive(_file: &File) -> std::io::Result<()> {
+impl FileExt for File {
+    fn try_lock_exclusive(&self) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn try_lock_shared(_file: &File) -> std::io::Result<()> {
+    fn try_lock_shared(&self) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn unlock(_file: &File) -> std::io::Result<()> {
+    fn unlock(&self) -> std::io::Result<()> {
         Ok(())
     }
 }

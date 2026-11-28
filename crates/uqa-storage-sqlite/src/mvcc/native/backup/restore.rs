@@ -13,7 +13,7 @@ use super::{
 use crate::{
     connection::image_import::ImageConnection,
     mvcc::{
-        backup_import::{insert_identifier, insert_record, physical_error, sqlite_error},
+        backup_import::{physical_error, sqlite_error, ImageWriter},
         schema,
     },
     SQLiteBackupImportOptions, SQLiteBackupImportStep,
@@ -22,23 +22,23 @@ use std::path::Path;
 use uqa_core::memory::MemoryReservation;
 use uqa_storage::{
     backup::{
-        BackupError, BackupLeaseInput, BackupResult, BackupRoot, BackupSourceStep, ImageProvider,
-        RecordImageImportUnit,
+        BackupError, BackupLeaseInput, BackupRecordImageWriter, BackupResult, BackupRoot,
+        BackupSourceStep, ImageProvider, RecordImageImportProgress,
     },
-    mvcc::{BackupCursorKey, DatabaseId, DatabaseRestore},
+    key_value::KeyValueImageWriter,
+    mvcc::{DatabaseId, DatabaseRestore},
     read_control::StorageReadControl,
 };
 
 /// Restore an image into an already created, empty private file. Raw values stream through the public incremental BLOB API. Projection and comparison retain one charged row at a time; the original memory allowance must cover that row and its bindings. An interrupted import remains unavailable. The enclosing restore owner still validates the logical catalog and artifacts before publishing its directory.
 pub struct SQLiteNativeBackupImport<'a> {
-    connection: Option<ImageConnection>,
+    connection: Option<ImageWriter>,
     state: State<'a>,
     root: BackupRoot,
     request: DatabaseRestore,
     control: StorageReadControl,
     maximum_value_bytes: usize,
-    records: u64,
-    identifiers: u64,
+    progress: RecordImageImportProgress,
 }
 
 enum State<'a> {
@@ -90,7 +90,7 @@ impl<'a> SQLiteNativeBackupImport<'a> {
         schema::backup_import::initialize(physical, root, request, control)
             .map_err(physical_error)?;
         Ok(Self {
-            connection: Some(connection),
+            connection: Some(ImageWriter::new(connection)),
             state: State::Reading {
                 input: Box::new(input),
                 _memory: memory,
@@ -100,8 +100,7 @@ impl<'a> SQLiteNativeBackupImport<'a> {
             request,
             control: control.clone(),
             maximum_value_bytes: options.maximum_value_bytes,
-            records: 0,
-            identifiers: 0,
+            progress: RecordImageImportProgress::default(),
         })
     }
 
@@ -120,10 +119,10 @@ impl<'a> SQLiteNativeBackupImport<'a> {
     }
 
     pub const fn imported_records(&self) -> u64 {
-        self.records
+        self.progress.records()
     }
     pub const fn imported_identifiers(&self) -> u64 {
-        self.identifiers
+        self.progress.identifiers()
     }
 
     /// Admit one input record, one physical row, or one fixed schema/verification boundary. Complete remains stable after later cancellation; every failed operation releases its input, row workspace and exclusive file owner.
@@ -158,12 +157,8 @@ impl<'a> SQLiteNativeBackupImport<'a> {
             return Err(BackupError::Invalid("zero object verification window"));
         }
         self.control.check()?;
-        let connection = self
-            .connection
-            .as_ref()
-            .ok_or(BackupError::Finished)?
-            .physical()
-            .map_err(sqlite_error)?;
+        let connection = self.connection.as_mut().ok_or(BackupError::Finished)?;
+        connection.physical().map_err(sqlite_error)?;
         match &mut self.state {
             State::Reading {
                 input, namespace, ..
@@ -177,8 +172,13 @@ impl<'a> SQLiteNativeBackupImport<'a> {
                     BackupSourceStep::Complete => {
                         let namespace = namespace
                             .ok_or(BackupError::Invalid("missing native image namespace"))?;
-                        format::image::initialize(connection, namespace, &self.control)
-                            .map_err(physical_error)?;
+                        connection.flush(&self.control)?;
+                        format::image::initialize(
+                            connection.physical().map_err(sqlite_error)?,
+                            namespace,
+                            &self.control,
+                        )
+                        .map_err(physical_error)?;
                         let memory = self
                             .control
                             .memory()
@@ -193,12 +193,12 @@ impl<'a> SQLiteNativeBackupImport<'a> {
                         };
                     }
                     BackupSourceStep::Unit => {
-                        if import_unit(connection, input, self.maximum_value_bytes, &self.control)?
-                        {
-                            self.records += 1;
-                        } else {
-                            self.identifiers += 1;
-                        }
+                        input.write_current(
+                            &mut self.progress,
+                            connection,
+                            self.maximum_value_bytes,
+                            &self.control,
+                        )?;
                     }
                 }
             }
@@ -208,7 +208,7 @@ impl<'a> SQLiteNativeBackupImport<'a> {
                 ..
             } => {
                 if projection
-                    .advance(connection, &self.control)
+                    .advance(connection.physical().map_err(sqlite_error)?, &self.control)
                     .map_err(physical_error)?
                 {
                     self.state = State::Publishing {
@@ -217,63 +217,22 @@ impl<'a> SQLiteNativeBackupImport<'a> {
                 }
             }
             State::Publishing { namespace } => {
-                format::image::complete(connection, *namespace, &self.control)
-                    .map_err(physical_error)?;
-                schema::backup_import::complete(connection, self.root, self.request, &self.control)
-                    .map_err(physical_error)?;
+                format::image::complete(
+                    connection.physical().map_err(sqlite_error)?,
+                    *namespace,
+                    &self.control,
+                )
+                .map_err(physical_error)?;
                 self.connection
                     .take()
                     .expect("active image owner")
-                    .publish_history(self.root, self.request, &self.control)
-                    .map_err(sqlite_error)?;
+                    .activate(self.root, self.request, &self.control)?;
                 self.state = State::Complete;
                 return Ok(SQLiteBackupImportStep::Complete);
             }
             State::Complete | State::Failed => unreachable!(),
         }
         Ok(SQLiteBackupImportStep::Pending)
-    }
-}
-
-fn import_unit(
-    connection: &rusqlite::Connection,
-    input: &mut SQLiteNativeImageImportReader<'_>,
-    maximum_value_bytes: usize,
-    control: &StorageReadControl,
-) -> BackupResult<bool> {
-    match input.current_unit().expect("admitted image unit") {
-        RecordImageImportUnit::Identifier {
-            namespace,
-            watermark,
-        } => {
-            insert_identifier(connection, namespace, watermark, control)?;
-            Ok(false)
-        }
-        RecordImageImportUnit::Record {
-            key,
-            revision,
-            value_bytes,
-        } => {
-            let limit = maximum_value_bytes.min(i32::MAX as usize) as u64;
-            if value_bytes > limit {
-                return Err(BackupError::Limit {
-                    resource: "native image row",
-                    required: value_bytes,
-                    limit,
-                });
-            }
-            let mut owned = BackupCursorKey::new(control.memory());
-            owned.extend_from_slice(key)?;
-            insert_record(
-                connection,
-                &owned,
-                revision.as_u64(),
-                value_bytes as i32,
-                |output| input.read_current(output),
-                control,
-            )?;
-            Ok(true)
-        }
     }
 }
 

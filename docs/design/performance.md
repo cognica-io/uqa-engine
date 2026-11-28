@@ -2,11 +2,33 @@
 
 This document records dated UQA Engine measurements, including controlled CI qualification and historical developer-machine comparisons. Each section identifies its source and measurement boundary; absolute times remain specific to the measured host. Controlled qualification uses independently authenticated host control and reference-only noise calibration. Unless a section explicitly compares another engine, its ratios compare UQA revisions. Measurements use the `bench` profile (release + debug symbols, thin LTO, `codegen-units = 1`) unless a section explicitly records a package-scoped `release` runner or a published package.
 
+## Graph posting results (2026-11-27 UTC)
+
+Ordinary traversal of a 512-vertex star with 511 edges retained 4,316,128 bytes on `a492473eb` and 80,272 bytes with shared vertex IDs, edge IDs and graph names on macOS ARM64. The same build retained 80,272 bytes for temporal traversal and 76,168 bytes for two PageRank rounds. These counts measure live heap allocations immediately after the operation returns, with the input graph constructed before measurement. Every posting retained its own score and referred to the complete sorted subgraph.
+
+## Join allocations (2026-11-27 UTC)
+
+On macOS ARM64 the same caller measured allocations inside the public text, vector and hybrid joins, with disjoint text and orthogonal vectors on the two sides and a similarity threshold of 1.0. Each join returned zero matches. The baseline was `c8294ac94`. Both sides contained the row count shown. [Join regressions](../../crates/uqa-joins/tests/cross_paradigm.rs)
+
+| Rows per side | Text join before → after | Vector join before → after | Hybrid join before → after |
+| --- | ---: | ---: | ---: |
+| 4, first call | 507 → 199 | 20 → 9 | 22 → 10 |
+| 4, subsequent call | 502 → 194 | 20 → 9 | 22 → 10 |
+| 32, subsequent call | 26,402 → 925 | 1,056 → 68 | 1,061 → 69 |
+
+Hashing 320 prebuilt numeric join keys, including a binary subnormal and a 40-digit decimal, took 3,200 allocations totaling 278,912 bytes on the same baseline. The new hash completed the same calls with zero allocations. [Numeric hash regressions](../../crates/uqa-joins/src/row_join.rs)
+
 ## Analyzer allocation and work counts (2026-11-27 UTC)
 
 On macOS ARM64 with Rust 1.95.0, the shared Korean and Japanese Viterbi lattice advanced a two-position frontier through 4,096 single-candidate positions. The original position vectors allocated 4,096 times for a total of 163,840 bytes after warm-up. Reusing a released single-candidate buffer reduced both counts to zero. Empty positions retain one vector header and the lattice accounts for all candidate buffers together. On Linux ARM64, the Korean prose tokenizer peak fell from 542,048 to 519,392 bytes and the phrase analysis and match peak fell from 69,394 to 66,562 bytes. All 39 tokenizer and dictionary measurements and all 36 phrase measurements passed the existing allocation and output limits. The regression checks each retained word position and releases the complete reservation on drop. [Lattice regression](../../crates/uqa-analysis/src/morphology/lattice/tests.rs)
 
 Lowercase and ASCII folding each processed an 8,192-byte owned scalar ASCII token at a fully reserved memory limit with zero allocations. A prepared literal mapping searched 32 KiB of unmatched text for 512 independent compound keys in one scan with zero allocations. Separate differential cases compare the transformed text and every original UTF-8 and covering UTF-16 span. [Token filter regression](../../crates/uqa-analysis/src/token/allocation/tests/common_filters/resources.rs) · [Mapping regressions](../../crates/uqa-analysis/src/char_filter/literals/tests.rs)
+
+## Vector search work and memory (2026-11-27 UTC)
+
+With a 256-entry DiskANN frontier, 512 equal-priority nodes offered in reverse order and every admission repeated, `c8294ac94` made 772,005 priority comparisons. Binary insertion and hashed membership completed the same workload within 5,120 comparisons. Both the retained node order and the number of PQ estimates are checked, including rediscovery of an evicted node. [DiskANN frontier regression](../../crates/uqa-storage/src/diskann_index/search/tests.rs)
+
+On a ring of 128 nodes with 256 coordinates each, the HNSW query used to retain 512 upper-layer cache bytes after the base search. It now releases that cache before evaluating the base and decodes at most 128 candidate vectors. In IVF, selecting five out of 1,024 two-component documents required more than 4,096 workspace bytes on the same baseline. Trained and untrained search now both return the five canonical scores within 4,096 bytes. These are local macOS ARM64 comparison and memory counts. [HNSW cache regression](../../crates/uqa-storage/src/hnsw_index/tests/reads.rs) · [IVF selection regression](../../crates/uqa-storage/src/ivf_index/tests.rs)
 
 ## Posting and fusion allocations (2026-11-27 UTC)
 

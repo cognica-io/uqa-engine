@@ -50,22 +50,30 @@ impl MemoryKeyValueStore {
     ) -> StorageBackendResult<Option<super::KeyValueReadRevision>> {
         self.control.check()?;
         let mut state = self.inner.lock();
+        self.stage_mutation(&mut state, mutate)?;
+        Ok(certify.then(|| super::KeyValueReadRevision::memory(&state.read_revision)))
+    }
+
+    fn stage_mutation(
+        &self,
+        state: &mut MemoryKeyValueState,
+        mutate: &mut super::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<()> {
         self.control.check()?;
-        check_write(&state)?;
+        check_write(state)?;
         let mut batch = MemoryKeyValueBatch {
             store: self,
             operations: Vec::new(),
         };
         mutate(
             &view::MemoryRead {
-                state: &state,
+                state,
                 control: &self.control,
             },
             &mut batch,
         )?;
         self.control.check()?;
-        apply_operations(&mut state, batch.operations)?;
-        Ok(certify.then(|| super::KeyValueReadRevision::memory(&state.read_revision)))
+        apply_operations(state, batch.operations)
     }
 }
 
@@ -92,6 +100,19 @@ impl KeyValueStore for MemoryKeyValueStore {
 
     fn with_mutation(&self, mutate: &mut super::KeyValueMutation<'_>) -> StorageBackendResult<()> {
         self.evaluate_mutation(mutate, false).map(|_| ())
+    }
+
+    fn try_with_transaction_mutation(
+        &self,
+        mutate: &mut super::KeyValueMutation<'_>,
+    ) -> StorageBackendResult<bool> {
+        self.control.check()?;
+        let mut state = self.inner.lock();
+        if state.transactions.is_empty() {
+            return Ok(false);
+        }
+        self.stage_mutation(&mut state, mutate)?;
+        Ok(true)
     }
 
     fn with_mutation_revision(

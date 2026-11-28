@@ -234,15 +234,20 @@ pub(super) fn encode_typed_value(
     ))
 }
 
-pub(super) fn encode_document_blobs(document: Document) -> SQLiteResult<EncodedDocument> {
+pub(super) fn encode_document_blobs(
+    fields: impl IntoIterator<Item = (String, Value)>,
+) -> SQLiteResult<EncodedDocument> {
     let mut stored = Document::new();
     let mut blobs = Vec::new();
-    for (field, value) in document {
-        let (stored_value, blob) = encode_stored_value(&field, value)?;
-        stored.insert(field.clone(), stored_value);
-        if let Some(bytes) = blob {
-            blobs.push((field, bytes));
+    for (field, value) in fields {
+        if matches!(value, Value::Null) {
+            continue;
         }
+        let (stored_value, blob) = encode_stored_value(&field, value)?;
+        if let Some(bytes) = blob {
+            blobs.push((field.clone(), bytes));
+        }
+        stored.insert(field, stored_value);
     }
     Ok((stored, blobs))
 }

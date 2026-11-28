@@ -100,9 +100,7 @@ fn stage_initial_writes(
     changes: &PrivateRecordChanges,
     control: &StorageReadControl,
 ) -> VersionResult<()> {
-    let stage = |write: crate::mvcc::PreparedRecordWrite| {
-        changes.apply_owned(std::slice::from_ref(&write), control)
-    };
+    let stage = |write: crate::mvcc::PreparedRecordWrite| changes.adopt_write(&write, control);
     let mut originals = original.writes();
     let mut mutation = 0;
     while let Some(write) = originals.next(control)? {

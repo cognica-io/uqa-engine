@@ -6,7 +6,6 @@
 
 //! Fixed native headers expose populations; writable lifecycle owners alone initialize complete origin evidence.
 
-use super::super::SQLiteDiskANNCanonical;
 use super::{invalid, RetainedSQLiteDiskANNCanonical};
 use crate::mvcc::native::{
     decode_record, populations, variable_fields_limit, NativeRecordOwner, NativeSnapshot,
@@ -17,10 +16,9 @@ use uqa_core::memory::BudgetedVec;
 use uqa_storage::{
     diskann_index::{
         format::{DiskANNGeneration, DiskANNManifest, DiskANNOriginLayout},
-        pages::DiskANNPageSource,
         DiskANNCanonicalCounts, DiskANNPopulationState,
     },
-    key_value::{publication, KeyValueDiskANNSource},
+    key_value::KeyValueDiskANNSource,
     mvcc::VersionError,
     read_control::StorageReadControl,
     KeyValueBatch, StorageBackendResult,
@@ -141,45 +139,5 @@ impl RetainedSQLiteDiskANNCanonical {
         )
         .map_err(VersionError::into_storage_error)?;
         batch.retire_diskann_population(&key)
-    }
-}
-
-impl SQLiteDiskANNCanonical {
-    pub(in crate::vector_index::diskann) fn initialize_populations(
-        &self,
-        index: &uqa_storage::RelationIdentity,
-        resolver: &dyn uqa_storage::diskann_index::catalog::DiskANNIndexResolver,
-        control: &StorageReadControl,
-    ) -> StorageBackendResult<()> {
-        let source = self.retain_for_index(index, control)?;
-        let selected = source
-            .selected_source(resolver, control)?
-            .ok_or_else(|| invalid("population initialization has no selected generation"))?;
-        let generation = selected.generation();
-        if source.read_population(generation, control)?.is_some() {
-            return Ok(());
-        }
-        let scope = source.index_scope(resolver, control)?;
-        self.index
-            .conn
-            .with_native_write(|snapshot, batch| {
-                let read = snapshot.record_read();
-                source.require_current_index(&read, batch, control)?;
-                {
-                    let mapped = crate::diskann::map_read(&read, snapshot.database)?;
-                    let mut mapped_batch =
-                        crate::diskann::map_batch(batch, snapshot.database, &snapshot.control)?;
-                    publication::require_selected_generation(
-                        &scope,
-                        &mapped,
-                        &mut mapped_batch,
-                        generation,
-                        control,
-                    )?;
-                }
-                source.publish_population(&selected, batch, control)?;
-                Ok(())
-            })?
-            .ok_or_else(|| invalid("population initialization requires a native session"))
     }
 }

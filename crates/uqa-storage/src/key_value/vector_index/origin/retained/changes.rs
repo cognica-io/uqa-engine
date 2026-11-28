@@ -7,7 +7,7 @@
 //! Journal seeks and canonical validation use the same fixed committed/private source.
 
 use super::{append, invalid, Record, RetainedDiskANNCanonical, BYTES};
-use crate::diskann_index::{format::DiskANNChangeIdentity, DiskANNCanonicalRead};
+use crate::diskann_index::{format::DiskANNChangeIdentity, DiskANNBoundRead, DiskANNCanonicalRead};
 use crate::read_control::StorageReadControl;
 use crate::StorageBackendResult;
 use uqa_core::DocId;
@@ -16,28 +16,16 @@ impl RetainedDiskANNCanonical {
     /// Return each currently journaled document once, including an empty replacement. Obsolete origins are skipped without loading their values. This does not establish which changes a published generation covers.
     pub fn next_change_after(
         &self,
-        mut after: Option<DocId>,
+        after: Option<DocId>,
         control: &StorageReadControl,
     ) -> StorageBackendResult<Option<DiskANNChangeIdentity>> {
-        loop {
-            self.check_control(control)?;
-            if after == Some(DocId::MAX) {
-                return Ok(None);
-            }
-            let Some(document) = self.next_journal_document(after, control)? else {
-                self.check_control(control)?;
-                return Ok(None);
-            };
-            after = Some(document);
-            let Some(canonical) = self.record(document, control)? else {
-                continue;
-            };
-            let identity = DiskANNChangeIdentity::new(document, canonical.version());
-            if self.matches_change(identity, canonical, control)? {
-                self.check_control(control)?;
-                return Ok(Some(identity));
-            }
-        }
+        self.next_canonical_change(
+            after,
+            DocId::MAX,
+            control,
+            |after| self.next_journal_document(after, control),
+            |change, origin| self.matches_change(change, origin, control),
+        )
     }
 
     fn next_journal_document(

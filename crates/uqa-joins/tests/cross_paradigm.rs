@@ -297,3 +297,155 @@ fn cross_paradigm_join_rejects_missing_vertex_and_non_finite_scores() {
             .is_err()
     );
 }
+
+#[test]
+fn right_input_preparation_scales_with_rows_for_text_vector_and_hybrid_joins() {
+    fn allocation_counts(count: u64) -> [u64; 3] {
+        let postings = |text: &str, vector: [f64; 2]| {
+            (1..=count)
+                .map(|id| {
+                    entry(
+                        id,
+                        fields(&[
+                            ("text", Value::Str(text.into())),
+                            ("group", Value::Int(1)),
+                            ("vec", Value::List(vector.map(Value::Float).to_vec())),
+                        ]),
+                        0.0,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let left = postings("espresso coffee", [1.0, 0.0]);
+        let right = postings("train station", [0.0, 1.0]);
+        [
+            allocation_counter::measure(|| {
+                assert!(TextSimilarityJoin::new(&left, &right, "text", "text")
+                    .threshold(1.0)
+                    .execute()
+                    .unwrap()
+                    .entries()
+                    .is_empty());
+            })
+            .count_total,
+            allocation_counter::measure(|| {
+                assert!(VectorSimilarityJoin::new(&left, &right, "vec", "vec")
+                    .threshold(1.0)
+                    .execute()
+                    .unwrap()
+                    .entries()
+                    .is_empty());
+            })
+            .count_total,
+            allocation_counter::measure(|| {
+                assert!(HybridJoin::new(&left, &right, "group", "vec")
+                    .threshold(1.0)
+                    .execute()
+                    .unwrap()
+                    .entries()
+                    .is_empty());
+            })
+            .count_total,
+        ]
+    }
+    let small = allocation_counts(4);
+    // Preparing the four-row text join also bounds the fixed cost of the standard analyzer.
+    assert!(
+        small[0] <= 384,
+        "four-row text join took {} allocations",
+        small[0]
+    );
+    let large = allocation_counts(32);
+    for (small, large) in small.into_iter().zip(large) {
+        assert!(
+            small > 0 && large <= 8 * small,
+            "allocations with 4 rows: {small}, with 32 rows: {large}"
+        );
+    }
+}
+
+#[test]
+fn vector_errors_follow_the_first_reachable_pair() {
+    let zero = Value::List(vec![Value::Int(0)]);
+    let pair = Value::List(vec![Value::Int(1), Value::Int(1)]);
+    let left = [entry(
+        1,
+        fields(&[("vec", zero), ("group", Value::Int(1))]),
+        0.0,
+    )];
+    let right = [
+        entry(2, fields(&[("vec", pair), ("group", Value::Int(1))]), 0.0),
+        entry(
+            3,
+            fields(&[("vec", Value::Bool(true)), ("group", Value::Int(2))]),
+            0.0,
+        ),
+    ];
+    let error = VectorSimilarityJoin::new(&left, &right, "vec", "vec")
+        .execute()
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("same non-zero dimension (1 != 2)"),
+        "{error}"
+    );
+    let hybrid = HybridJoin::new(&left, &right, "group", "vec")
+        .execute()
+        .unwrap_err();
+    assert_eq!(error, hybrid.to_string());
+    assert!(HybridJoin::new(&left, &right[1..], "group", "vec")
+        .execute()
+        .unwrap()
+        .entries()
+        .is_empty());
+    assert!(VectorSimilarityJoin::new(&[], &right, "vec", "vec")
+        .execute()
+        .unwrap()
+        .entries()
+        .is_empty());
+}
+
+#[test]
+fn prepared_vector_pairs_preserve_scaled_cosine_score_bits() {
+    let cases: &[([f64; 3], [f64; 3], u64)] = &[
+        ([1.0, 3.0, -4.0], [5.0, -2.0, 7.0], 0xbfe4_9b61_f4f9_7415),
+        (
+            [f64::MAX, f64::MAX / 4.0, -f64::MAX],
+            [f64::MAX / 8.0, f64::MAX, f64::MAX / 2.0],
+            0xbfb3_ce61_1505_0364,
+        ),
+        (
+            [f64::from_bits(1), f64::from_bits(2), 0.0],
+            [f64::from_bits(3), 0.0, f64::from_bits(1)],
+            0x3fdb_2724_7aff_148f,
+        ),
+    ];
+    for &(a, b, expected) in cases {
+        let posting = |id, v: [f64; 3]| {
+            entry(
+                id,
+                fields(&[
+                    ("v", Value::List(v.map(Value::Float).to_vec())),
+                    ("g", Value::Int(1)),
+                ]),
+                0.0,
+            )
+        };
+        let (left, right) = ([posting(1, a)], [posting(2, b)]);
+        for result in [
+            VectorSimilarityJoin::new(&left, &right, "v", "v")
+                .threshold(-1.0)
+                .execute()
+                .unwrap(),
+            HybridJoin::new(&left, &right, "g", "v")
+                .threshold(-1.0)
+                .execute()
+                .unwrap(),
+        ] {
+            let Value::Float(score) = result.entries()[0].payload.fields["_score"] else {
+                panic!("expected score")
+            };
+            assert_eq!(score.to_bits(), expected);
+        }
+    }
+}

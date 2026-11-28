@@ -4,9 +4,12 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-use super::{invalid, RetainedDiskANNCanonical};
-use crate::diskann_index::{build::DiskANNCanonicalCoverage, catalog::DiskANNIndexResolver};
-use crate::key_value::{publication, KeyValueRead};
+use super::RetainedDiskANNCanonical;
+use crate::diskann_index::{
+    build::DiskANNCanonicalCoverage, catalog::DiskANNIndexResolver, format::DiskANNGeneration,
+    DiskANNRetainedMutation,
+};
+use crate::key_value::{KeyValueDiskANNSource, KeyValueRead};
 use crate::{read_control::StorageReadControl, KeyValueBatch, StorageBackendResult};
 
 impl RetainedDiskANNCanonical {
@@ -17,55 +20,57 @@ impl RetainedDiskANNCanonical {
         read: &dyn KeyValueRead,
         batch: &mut dyn KeyValueBatch,
         control: &StorageReadControl,
-    ) -> StorageBackendResult<crate::diskann_index::format::DiskANNGeneration> {
-        self.require_current_index(read, batch, control)?;
-        let scope = self.index_scope(resolver, control)?;
-        let generation =
-            publication::retire_captured_generation(&scope, &*self.read, read, batch, control)?;
-        self.retire_population(generation, batch, control)?;
-        Ok(generation)
+    ) -> StorageBackendResult<DiskANNGeneration> {
+        DiskANNRetainedMutation::retire_generation(self, resolver, read, batch, control)
     }
 
     /// Publish a completed build in the supplied caller mutation. The read and batch must belong to the same `with_mutation` callback; this method never completes that transaction. The SQL lifecycle must supersede the effect if later private DDL invalidates the index.
     pub fn publish_generation(
         coverage: &DiskANNCanonicalCoverage<Self>,
         resolver: &dyn DiskANNIndexResolver,
-        sealed: &crate::key_value::KeyValueDiskANNSource,
+        sealed: &KeyValueDiskANNSource,
         read: &dyn KeyValueRead,
         batch: &mut dyn KeyValueBatch,
         control: &StorageReadControl,
     ) -> StorageBackendResult<()> {
-        coverage.check_control(control)?;
-        let source = coverage.source();
-        source.require_current_index(read, batch, control)?;
-        let prefixes = [&*source.vectors, &*source.origins];
-        let original = source.read.revision(&prefixes)?;
-        if original.has_private_changes()
-            && !original.same_private_changes(&read.revision(&prefixes)?)
-        {
-            return Err(invalid(
-                "captured private canonical input changed before publication",
-            ));
-        }
-        let scope = source.index_scope(resolver, control)?;
-        let previous = publication::selected_generation(&scope, &*source.read, control)?;
-        publication::publish_captured_generation(
-            coverage,
-            &scope,
-            source
-                .index_parameters()
-                .ok_or_else(|| invalid("missing index parameters"))?,
-            publication::DiskANNPublicationViews {
-                captured: &*source.read,
-                current: read,
-                batch,
-                sealed,
-            },
-            control,
-        )?;
-        if let Some(previous) = previous {
-            source.retire_population(previous, batch, control)?;
-        }
-        source.publish_population(sealed, batch, control)
+        <Self as DiskANNRetainedMutation<_>>::publish_generation(
+            coverage, resolver, sealed, read, batch, control,
+        )
+    }
+}
+
+impl<'view> DiskANNRetainedMutation<dyn KeyValueRead + 'view> for RetainedDiskANNCanonical {
+    fn guard_catalog(
+        &self,
+        current: &(dyn KeyValueRead + 'view),
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        self.require_current_index(current, batch, control)
+    }
+    fn with_canonical_records<T>(
+        &self,
+        current: &(dyn KeyValueRead + 'view),
+        _: &'static str,
+        _: &StorageReadControl,
+        visit: impl FnOnce(&dyn KeyValueRead, &dyn KeyValueRead, &[&[u8]]) -> StorageBackendResult<T>,
+    ) -> StorageBackendResult<T> {
+        visit(&*self.read, current, &[&self.vectors, &self.origins])
+    }
+    fn retire_population(
+        &self,
+        generation: DiskANNGeneration,
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        Self::retire_population(self, generation, batch, control)
+    }
+    fn publish_population(
+        &self,
+        sealed: &KeyValueDiskANNSource,
+        batch: &mut dyn KeyValueBatch,
+        control: &StorageReadControl,
+    ) -> StorageBackendResult<()> {
+        Self::publish_population(self, sealed, batch, control)
     }
 }

@@ -10,7 +10,7 @@ use crate::diskann_index::{
     changes::{DiskANNChangeJournal, DiskANNChangeRead, DiskANNPruneRequest, DiskANNPruneResult},
     format::DiskANNChangeIdentity,
     maintenance::{DiskANNStatisticsPage, DiskANNStatisticsRequest},
-    DiskANNCanonicalRead,
+    DiskANNBoundRead, DiskANNCanonicalRead, DiskANNRetainedMutation,
 };
 use crate::key_value::{KeyValueDiskANNPruner, KeyValueRead};
 use crate::{read_control::StorageReadControl, KeyValueBatch, StorageBackendResult};
@@ -23,8 +23,8 @@ impl RetainedDiskANNCanonical {
         request: DiskANNStatisticsRequest,
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNStatisticsPage> {
-        self.check_control(control)?;
-        let page = pruner.statistics(
+        self.measure_journal(
+            pruner,
             &Journal {
                 source: self,
                 discovery: &*self.read,
@@ -32,9 +32,7 @@ impl RetainedDiskANNCanonical {
             },
             request,
             control,
-        )?;
-        self.check_control(control)?;
-        Ok(page)
+        )
     }
 
     /// Evaluate a bounded journal page in the caller's same read/batch scope. Only the catalog binding comes from this retained source; obsolescence uses the command's committed canonical view. Private canonical writes or a private head cannot authorize cleanup.
@@ -77,38 +75,20 @@ impl RetainedDiskANNCanonical {
         control: &StorageReadControl,
     ) -> StorageBackendResult<DiskANNPruneResult> {
         let (discovery, read, batch) = mutation;
-        self.require_current_index(read, batch, control)?;
-        if read
-            .revision(&[&self.vectors, &self.origins])?
-            .has_private_changes()
-        {
-            return Err(invalid(
-                "journal pruning requires committed canonical input",
-            ));
-        }
-        pruner.require_selected(
-            &self.index_scope(resolver, control)?,
-            self.dimensions,
-            self.index_parameters()
-                .ok_or_else(|| invalid("missing index parameters"))?,
-            read,
-            batch,
-            control,
-        )?;
-        let result = pruner.prune(
-            &mut JournalMutation {
-                read: Journal {
-                    source: self,
-                    discovery,
-                    read,
+        self.prune_journal(resolver, pruner, read, batch, control, |batch| {
+            pruner.prune(
+                &mut JournalMutation {
+                    read: Journal {
+                        source: self,
+                        discovery,
+                        read,
+                    },
+                    batch,
                 },
-                batch,
-            },
-            request,
-            control,
-        )?;
-        self.check_control(control)?;
-        Ok(result)
+                request,
+                control,
+            )
+        })
     }
 }
 

@@ -8,13 +8,13 @@
 
 use super::{
     agtype, agtype_add, agtype_div, agtype_mod, agtype_pow, nonnegative_i64_to_usize, null_or_bool,
-    numeric_op, regex_match, str_predicate, strict_bool, usize_to_i64, value_property, BTreeMap,
-    BinaryOp, Binding, BindingRow, CaseExpr, CypherError, CypherExecutor, CypherExpr, GraphStore,
-    InList, IsNotNull, IsNull, ListComprehension, ListIndex, ListLiteral, ListSlice, Literal,
-    MapLiteral, Parameter, PropertyAccess, UnaryOp, Value, Variable,
+    numeric_op, str_predicate, strict_bool, usize_to_i64, value_property, BTreeMap, BinaryOp,
+    Binding, BindingRow, CaseExpr, CypherError, CypherExpr, GraphStore, InList, IsNotNull, IsNull,
+    ListComprehension, ListIndex, ListLiteral, ListSlice, Literal, MapLiteral, Parameter,
+    PropertyAccess, StatementReader, UnaryOp, Value, Variable,
 };
 
-impl<G: GraphStore> CypherExecutor<'_, G> {
+impl<G: GraphStore> StatementReader<'_, G> {
     pub(crate) fn eval(&self, expr: &CypherExpr, row: &BindingRow) -> Result<Value, CypherError> {
         match expr {
             CypherExpr::Literal(Literal { value }) => Ok(value.clone()),
@@ -137,7 +137,7 @@ impl<G: GraphStore> CypherExecutor<'_, G> {
             "STARTS WITH" => Ok(str_predicate(&lhs, &rhs, |a, b| a.starts_with(b))),
             "ENDS WITH" => Ok(str_predicate(&lhs, &rhs, |a, b| a.ends_with(b))),
             "CONTAINS" => Ok(str_predicate(&lhs, &rhs, |a, b| a.contains(b))),
-            "=~" => regex_match(&lhs, &rhs),
+            "=~" => self.patterns.matches(&lhs, &rhs),
             other => Err(CypherError::Unsupported(format!("binary op {other}"))),
         }
     }

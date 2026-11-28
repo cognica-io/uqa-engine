@@ -52,7 +52,20 @@ const RESIDENT_DIVISOR: usize = 16;
 
 struct Change {
     write: PreparedRecordWrite,
-    identity: PrivateRecordRevision,
+}
+
+impl Change {
+    fn new(write: PreparedRecordWrite, revision: PrivateRecordRevision) -> Self {
+        Self {
+            write: write.with_private_revision(revision),
+        }
+    }
+
+    fn identity(&self) -> PrivateRecordRevision {
+        self.write
+            .private_revision()
+            .expect("a staged record has a private revision")
+    }
 }
 
 /// Process-local identity of an evaluated private batch. Identities are never reused across transactions or undo branches; they are not durable commit sequences.
@@ -198,7 +211,7 @@ impl State {
                 change.write.key(),
                 change.write.expected(),
                 change.write.kind(),
-                change.identity,
+                change.identity(),
                 change.write.value(),
                 control,
             )?;
@@ -317,7 +330,7 @@ impl PrivateRecordChanges {
         changes
     }
 
-    /// Adopt a sorted derived run without copying its payloads. Its writes share `revision`; subsequent changes and savepoints use the ordinary private-root lifecycle.
+    /// Adopt a sorted derived run without copying its payloads. Each entry retains its evaluated revision. The root has an independent identity for later changes and savepoints.
     pub(in crate::mvcc) fn from_spilled_run(
         run: Option<run::SpilledRun>,
         revision: PrivateRecordRevision,
@@ -341,8 +354,12 @@ impl PrivateRecordChanges {
             if let Some(mut scopes) = state.policy.take_scopes() {
                 let mut cursor = run.cursor(std::ops::Bound::Unbounded);
                 while let Some(entry) = cursor.next(control)? {
-                    let key = PreparedRecordWrite::from_shared(entry.key, None, None);
-                    scopes = scopes.with_writes(&[key], revision, control)?;
+                    scopes = scopes.with_writes(
+                        [entry.key.bytes()],
+                        revision,
+                        Some(entry.identity),
+                        control,
+                    )?;
                 }
                 state.policy.restore_scopes(Some(scopes));
             }
@@ -387,9 +404,32 @@ impl PrivateRecordChanges {
         self.apply_owned(writes, control)
     }
 
+    /// Assign a new private revision to each evaluated batch, including a write that repeats an existing value.
     pub(crate) fn apply_owned(
         &self,
         writes: &[PreparedRecordWrite],
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.stage(writes, None, control)
+    }
+
+    /// Preserve the revision of an unchanged write forwarded by effect resolution.
+    pub(in crate::mvcc) fn adopt_write(
+        &self,
+        write: &PreparedRecordWrite,
+        control: &StorageReadControl,
+    ) -> VersionResult<()> {
+        self.stage(
+            std::slice::from_ref(write),
+            write.private_revision(),
+            control,
+        )
+    }
+
+    fn stage(
+        &self,
+        writes: &[PreparedRecordWrite],
+        forwarded: Option<PrivateRecordRevision>,
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         if writes.is_empty() {
@@ -409,11 +449,19 @@ impl PrivateRecordChanges {
             }
         }
         state.make_room(control)?;
-        let identity = PrivateRecordRevision::allocate()?;
+        let root_revision = PrivateRecordRevision::allocate()?;
+        let identity = forwarded.unwrap_or(root_revision);
         let scopes = state
             .policy
             .scopes()
-            .map(|scopes| scopes.with_writes(writes, identity, control))
+            .map(|scopes| {
+                scopes.with_writes(
+                    writes.iter().map(PreparedRecordWrite::key),
+                    root_revision,
+                    forwarded,
+                    control,
+                )
+            })
             .transpose()?;
         let invalidates_source = writes
             .iter()
@@ -422,16 +470,12 @@ impl PrivateRecordChanges {
             let write = &writes[0];
             control.cancellation().check()?;
             let resident = replaced_resident(&state.records, state.resident, write);
-            state.records.try_insert(
-                write.shared_key(),
-                Change {
-                    write: write.clone(),
-                    identity,
-                },
-            )?;
+            state
+                .records
+                .try_insert(write.shared_key(), Change::new(write.clone(), identity))?;
             state.resident = resident;
             state.policy.restore_scopes(scopes);
-            state.revision = Some(identity);
+            state.revision = Some(root_revision);
             return Ok(());
         }
         let mut records = state.records.clone();
@@ -440,13 +484,7 @@ impl PrivateRecordChanges {
         for write in writes {
             control.cancellation().check()?;
             resident = replaced_resident(&records, resident, write);
-            records.try_insert(
-                write.shared_key(),
-                Change {
-                    write: write.clone(),
-                    identity,
-                },
-            )?;
+            records.try_insert(write.shared_key(), Change::new(write.clone(), identity))?;
             if sources.get(write.key()).is_some_and(Option::is_some) {
                 sources.try_insert(write.shared_key(), None)?;
             }
@@ -457,7 +495,7 @@ impl PrivateRecordChanges {
         state.sources = sources.snapshot();
         state.policy.restore_scopes(scopes);
         state.resident = resident;
-        state.revision = Some(identity);
+        state.revision = Some(root_revision);
         Ok(())
     }
 
@@ -470,7 +508,7 @@ impl PrivateRecordChanges {
         if let Some(writes) = prepared.resident() {
             let changes = Self::with_revision_scope(control.memory(), scope);
             for write in writes {
-                changes.apply_owned(std::slice::from_ref(write), control)?;
+                changes.adopt_write(write, control)?;
             }
             return Ok(changes);
         }
@@ -634,7 +672,7 @@ impl PrivateRecordChanges {
                     resident.write.key(),
                     resident.write.expected(),
                     resident.write.kind(),
-                    resident.identity,
+                    resident.identity(),
                     resident.write.value(),
                     control,
                 )?,

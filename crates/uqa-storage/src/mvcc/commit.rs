@@ -31,7 +31,8 @@ use crate::read_control::StorageReadControl;
 use super::graph::{GraphEffects, OwnedGraphMutation};
 use super::key::RecordKey;
 use super::{
-    CommitFingerprint, CommitSequence, GraphMutation, RecordWrite, VersionError, VersionResult,
+    CommitFingerprint, CommitSequence, GraphMutation, PrivateRecordRevision, RecordWrite,
+    VersionError, VersionResult,
 };
 
 #[derive(Clone)]
@@ -40,6 +41,8 @@ pub struct PreparedRecordWrite {
     expected: Option<CommitSequence>,
     value: Option<Arc<BudgetedVec<u8>>>,
     kind: RecordWriteKind,
+    // An unchanged evaluated write keeps its process-local identity across command snapshots.
+    private_revision: Option<PrivateRecordRevision>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -123,6 +126,7 @@ impl PreparedRecordWrite {
             expected,
             value,
             kind: RecordWriteKind::Canonical,
+            private_revision: None,
         }
     }
 
@@ -164,7 +168,19 @@ impl PreparedRecordWrite {
         self.key.clone()
     }
 
+    pub(super) fn private_revision(&self) -> Option<PrivateRecordRevision> {
+        self.private_revision
+    }
+
+    pub(super) fn with_private_revision(mut self, revision: PrivateRecordRevision) -> Self {
+        self.private_revision = Some(revision);
+        self
+    }
+
     pub(super) fn rebase(mut self, expected: Option<CommitSequence>) -> Self {
+        if self.expected != expected {
+            self.private_revision = None;
+        }
         self.expected = expected;
         self
     }
@@ -173,11 +189,17 @@ impl PreparedRecordWrite {
         self.kind
     }
     pub(crate) fn with_kind(mut self, kind: RecordWriteKind) -> Self {
+        if self.kind != kind {
+            self.private_revision = None;
+        }
         self.kind = kind;
         self
     }
 
     pub(super) fn with_value(mut self, value: BudgetedVec<u8>) -> Self {
+        if self.private_revision.is_some() && self.value() != Some(&value) {
+            self.private_revision = None;
+        }
         self.value = Some(Arc::new(value));
         self
     }

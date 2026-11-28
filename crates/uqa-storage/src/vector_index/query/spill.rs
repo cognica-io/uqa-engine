@@ -10,6 +10,7 @@ use super::{postings_from_unique_scores, VectorQueryBuffer};
 use crate::{
     read_control::StorageReadControl,
     spill_map::{invalid, Map, Record},
+    vector_index::maximum_tensor_score,
     StorageBackendResult,
 };
 use std::cmp::Ordering;
@@ -32,7 +33,7 @@ impl SpillingVectorScores {
         let best = self
             .scores
             .get(u128::from(document))?
-            .map_or(score, |value| (*value).max(score));
+            .map_or(score, |value| maximum_tensor_score(*value, score));
         self.scores
             .insert(u128::from(document), best, Some(&self.control))
     }
@@ -151,22 +152,28 @@ mod tests {
             (6, 1.0),
             (7, 0.0),
             (7, -0.0),
+            (8, -0.0),
+            (8, -0.0),
         ];
         for k in [0, 1, 10] {
             let control = StorageReadControl::with_limit(32 * 1024);
             let mut spilled = SpillingVectorScores::new(&control);
-            let mut reference = std::collections::BTreeMap::<DocId, f32>::new();
             for (document, score) in input {
                 spilled.add(document, score).unwrap();
-                reference
-                    .entry(document)
-                    .and_modify(|value| *value = value.max(score))
-                    .or_insert(score);
             }
             spilled.scores.spill(Some(&control)).unwrap();
             assert!(spilled.scores.is_spilled());
             let mut scores = VectorQueryBuffer::new(None);
-            for entry in reference {
+            for entry in [
+                (1, 0.0),
+                (2, f32::NAN),
+                (3, f32::NEG_INFINITY),
+                (4, f32::INFINITY),
+                (5, 1.0),
+                (6, 1.0),
+                (7, 0.0),
+                (8, -0.0),
+            ] {
                 scores.push(entry).unwrap();
             }
             let expected = postings_from_unique_scores(scores, Some(k), None).unwrap();

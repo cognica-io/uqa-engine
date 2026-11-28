@@ -100,6 +100,22 @@ impl<'a> SQLiteNativeImageImportReader<'a> {
     pub fn native_namespace(&self) -> Option<DatabaseId> {
         self.0.mapping()?.namespace
     }
+    pub(super) fn write_current(
+        &mut self,
+        progress: &mut uqa_storage::backup::RecordImageImportProgress,
+        writer: &mut impl uqa_storage::backup::BackupRecordImageWriter,
+        limit: usize,
+        control: &StorageReadControl,
+    ) -> BackupResult<()> {
+        progress.write_current(
+            &mut self.0,
+            writer,
+            limit.min(i32::MAX as usize),
+            "native image row",
+            control,
+        )
+    }
+
     pub fn current_unit(&self) -> Option<RecordImageImportUnit<'_>> {
         self.0.current_unit()
     }

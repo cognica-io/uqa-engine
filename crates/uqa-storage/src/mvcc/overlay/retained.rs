@@ -50,12 +50,12 @@ impl PrivateRecordChanges {
         let scopes = state
             .policy
             .scopes()
-            .map(|scopes| scopes.with_writes(std::slice::from_ref(&write), identity, control))
+            .map(|scopes| scopes.with_writes([write.key()], identity, None, control))
             .transpose()?;
         let key = write.shared_key();
         let records = state
             .records
-            .with_insert(key.clone(), Change { write, identity })?;
+            .with_insert(key.clone(), Change::new(write, identity))?;
         let mut sources = state.source_writes();
         sources.try_insert(key, Some(source))?;
         control.check()?;

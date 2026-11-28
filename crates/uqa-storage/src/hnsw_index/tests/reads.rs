@@ -219,6 +219,26 @@ fn hierarchy_query_reuses_exact_distances_and_keeps_uncached_fallback() {
 }
 
 #[test]
+fn base_layer_search_releases_upper_distances_and_decodes_each_candidate_once() {
+    use super::super::search::Query;
+    let dimensions = 256;
+    let control = StorageReadControl::with_limit(128 * 1024);
+    let graph = ring(dimensions, 128, &control).finish().unwrap();
+    let cache = uqa_core::memory::MemoryBudget::new(128 * 1024);
+    let values = vector(19, dimensions);
+    let mut query = Query::new(&values, &cache);
+    query.score(&graph, 1).unwrap().unwrap();
+    assert!(cache.used() > 0);
+    super::super::store::DECODED_VECTOR_FLOATS.set(0);
+    let results = graph
+        .search_layer(&mut query, &[1], 128, 0, Some(&control), Some(&control))
+        .unwrap();
+    assert_eq!(results.iter().count(), 128);
+    assert!(super::super::store::DECODED_VECTOR_FLOATS.get() <= 128 * dimensions);
+    assert_eq!(cache.used(), 0);
+}
+
+#[test]
 fn spilled_topology_validation_does_not_decode_dense_vectors() {
     for dimensions in [256, 1024] {
         let control = StorageReadControl::with_limit(128 * 1024);

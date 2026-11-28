@@ -74,6 +74,26 @@ impl Records {
         })
     }
 
+    fn evaluate_mapped(
+        &self,
+        read: &dyn uqa_storage::key_value::KeyValueRead,
+        batch: &mut dyn KeyValueBatch,
+        mutate: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<()> {
+        mutate(
+            &Read {
+                inner: read,
+                mapping: self.mapping,
+                _memory: None,
+            },
+            &mut Batch {
+                inner: Owner::Scoped(batch),
+                mapping: self.mapping,
+                control: read.control().clone(),
+            },
+        )
+    }
+
     fn wrap(&self, inner: Arc<dyn KeyValueStore>) -> StorageBackendResult<Arc<dyn KeyValueStore>> {
         let control = inner.retention_control().ok_or_else(invalid)?;
         Ok(Arc::new(Self {
@@ -181,20 +201,18 @@ impl KeyValueStore for Records {
     }
 
     fn with_mutation(&self, mutate: &mut KeyValueMutation<'_>) -> StorageBackendResult<()> {
-        self.inner.with_mutation(&mut |read, batch| {
-            mutate(
-                &Read {
-                    inner: read,
-                    mapping: self.mapping,
-                    _memory: None,
-                },
-                &mut Batch {
-                    inner: Owner::Scoped(batch),
-                    mapping: self.mapping,
-                    control: read.control().clone(),
-                },
-            )
-        })
+        self.inner
+            .with_mutation(&mut |read, batch| self.evaluate_mapped(read, batch, mutate))
+    }
+
+    fn try_with_transaction_mutation(
+        &self,
+        mutate: &mut KeyValueMutation<'_>,
+    ) -> StorageBackendResult<bool> {
+        self.inner
+            .try_with_transaction_mutation(&mut |read, batch| {
+                self.evaluate_mapped(read, batch, mutate)
+            })
     }
 
     fn with_versioned_mutation(
@@ -203,19 +221,7 @@ impl KeyValueStore for Records {
     ) -> StorageBackendResult<()> {
         self.inner
             .with_versioned_mutation(&mut |origin, read, batch| {
-                mutate(
-                    origin,
-                    &Read {
-                        inner: read,
-                        mapping: self.mapping,
-                        _memory: None,
-                    },
-                    &mut Batch {
-                        inner: Owner::Scoped(batch),
-                        mapping: self.mapping,
-                        control: read.control().clone(),
-                    },
-                )
+                self.evaluate_mapped(read, batch, &mut |read, batch| mutate(origin, read, batch))
             })
     }
 

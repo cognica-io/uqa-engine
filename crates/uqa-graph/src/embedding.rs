@@ -16,6 +16,8 @@
 //! on the payload's `_embedding` field as a `Value::List(Float)` so
 //! downstream vector-similarity scorers can consume it directly.
 
+use std::sync::Arc;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use uqa_core::{DocId, EdgeId, Payload, PostingEntry, PostingList, Value, VertexId};
@@ -104,6 +106,7 @@ impl<'a> GraphEmbedding<'a> {
         entries
             .try_reserve_exact(vertices.len())
             .map_err(|error| allocation_error("posting entries", vertices.len(), &error))?;
+        let graph_name: Arc<str> = self.graph.into();
         let mut graph_payloads: BTreeMap<DocId, GraphPayload> = BTreeMap::new();
         for vid in &vertices {
             let embedding =
@@ -124,9 +127,9 @@ impl<'a> GraphEmbedding<'a> {
             graph_payloads.insert(
                 *vid,
                 GraphPayload {
-                    subgraph_vertices: vec![*vid],
-                    subgraph_edges: Vec::new(),
-                    graph_name: self.graph.to_string(),
+                    subgraph_vertices: [*vid].into(),
+                    subgraph_edges: Arc::default(),
+                    graph_name: Arc::clone(&graph_name),
                     score_override: None,
                 },
             );

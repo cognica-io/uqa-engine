@@ -64,6 +64,37 @@ fn protection() -> Protection {
     }
 }
 
+#[test]
+fn interrupted_sqlite_image_commits_only_complete_private_chunks() {
+    let directory = tempfile::tempdir().unwrap();
+    let control = control();
+    let connection = open(&directory.path().join("source"), 0).unwrap();
+    let owner = SQLiteKeyValueStorage::from_connection(connection).unwrap();
+    let store = owner.store();
+    let mut batch = store.batch();
+    for id in 0_u32..192 {
+        batch.put(&id.to_be_bytes(), b"value").unwrap();
+    }
+    batch.commit().unwrap();
+    let (repository, root) = capture(&owner, &directory.path().join("repository"), &control);
+    let target = directory.path().join("target");
+    empty_file(&target);
+    let lease = repository.open_backup(root.backup(), &control).unwrap();
+    let request = DatabaseRestore::new(root.cut().source).unwrap();
+    let mut input =
+        SQLiteKeyValueBackupImport::new(&target, lease, request, options(0), &control).unwrap();
+    while input.imported_records() + input.imported_identifiers() < 129 {
+        assert_eq!(input.advance().unwrap(), SQLiteBackupImportStep::Pending);
+    }
+    drop(input);
+    let raw = rusqlite::Connection::open(target).unwrap();
+    let (format, stored): (i64, i64) = raw.query_row(
+        "SELECT format, (SELECT count(*) FROM _uqa_mvcc_versions) + (SELECT count(*) FROM _uqa_mvcc_identifiers) FROM _uqa_mvcc_metadata",
+        [], |row| Ok((row.get(0)?, row.get(1)?)),
+    ).unwrap();
+    assert_eq!((format, stored), (0, 128));
+}
+
 pub(super) fn capture(
     owner: &SQLiteKeyValueStorage,
     path: &Path,

@@ -259,57 +259,70 @@ impl SQLiteRecordStore {
     /// Run a read in one physical transaction of a database that still is this store's. Its native format, history identity and restoration state are checked, unless the connection found them valid at the committed state it now reads: every read begins this way, and the checks cost more than a point read.
     fn read<T>(
         &self,
+        control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
         #[cfg(test)]
         RECORD_READS.with(|count| count.set(count.get() + 1));
-        self.connection
-            .with_record_read(|connection, validated| {
-                Ok((|| {
-                    let transaction = connection.unchecked_transaction()?;
+        self.with_record_connection(control, |connection, validated| {
+            admission::read(
+                connection,
+                control,
+                |transaction| {
+                    Ok(transaction
+                        .prepare_cached("PRAGMA data_version")?
+                        .query_row([], |row| row.get(0))?)
+                },
+                |transaction, data_version| {
                     let state = crate::connection::ValidatedRead {
                         store: (
                             self.identity.as_bytes(),
                             self.native.map(|namespace| namespace.0.as_bytes()),
                         ),
-                        data_version: transaction
-                            .prepare_cached("PRAGMA data_version")?
-                            .query_row([], |row| row.get(0))?,
+                        data_version,
                         changes: connection.total_changes(),
                     };
                     if validated.get() != Some(state) {
-                        native::check_mapping(&transaction, self.native)?;
-                        codec::header(&transaction, self.identity)?;
+                        native::check_mapping(transaction, self.native)?;
+                        codec::header(transaction, self.identity)?;
                         validated.set(Some(state));
                         #[cfg(test)]
                         READ_VALIDATIONS.with(|count| count.set(count.get() + 1));
                     }
-                    let result = operation(&transaction)?;
-                    transaction.commit()?;
-                    Ok(result)
-                })())
-            })
-            .map_err(|error| VersionError::Storage(error.into()))?
-            .map_err(Error::into_version)
+                    operation(transaction)
+                },
+            )
+        })
     }
 
-    fn with_write<T>(
+    fn with_admission<T>(
         &self,
         control: &StorageReadControl,
         operation: impl FnOnce(&Connection) -> PhysicalResult<T>,
     ) -> VersionResult<T> {
+        self.with_record_connection(control, |connection, _| operation(connection))
+    }
+
+    fn with_record_connection<T>(
+        &self,
+        control: &StorageReadControl,
+        operation: impl FnOnce(
+            &Connection,
+            &std::cell::Cell<Option<crate::connection::ValidatedRead>>,
+        ) -> PhysicalResult<T>,
+    ) -> VersionResult<T> {
         let mut operation = Some(operation);
         loop {
             control.cancellation().check()?;
-            let result = self
-                .connection
-                .with_record_connection(control, |connection| {
-                    let _timeout = admission::BusyTimeout::new(connection)?;
-                    control.cancellation().check()?;
-                    Ok(operation.take().expect("record write runs once")(
-                        connection,
-                    ))
-                });
+            let result =
+                self.connection
+                    .with_record_connection(control, |connection, validated| {
+                        let _timeout = admission::BusyTimeout::new(connection)?;
+                        control.cancellation().check()?;
+                        Ok(operation.take().expect("record operation runs once")(
+                            connection, validated,
+                        ))
+                    });
             match result {
                 Err(SQLiteError::SQLite(error))
                     if operation.is_some() && admission::is_busy(&error) =>
@@ -346,7 +359,7 @@ impl VersionedPersistence for SQLiteRecordStore {
     }
 
     fn synchronize_sequence_values(&self, control: &StorageReadControl) -> VersionResult<()> {
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             sequence_durability::synchronize(connection, self.identity, self.native, control)
         })
     }
@@ -378,7 +391,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<Option<u64>> {
         control.cancellation().check()?;
-        self.with(|connection| {
+        self.with_admission(control, |connection| {
             identifiers::read(connection, self.identity, self.native, namespace, control)
         })
     }
@@ -390,7 +403,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<uqa_storage::mvcc::IdentifierAllocation> {
         control.cancellation().check()?;
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             identifiers::allocate(
                 connection,
                 self.identity,
@@ -456,7 +469,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<StorageTransactionId> {
         control.cancellation().check()?;
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             write::allocate(connection, self.identity, self.native, control)
         })
     }
@@ -476,13 +489,17 @@ impl VersionedPersistence for SQLiteRecordStore {
         let monitor = self.commit_monitor_version()?;
         let mut reclamation_epoch = 0;
         let lease = self.snapshots.capture(control, || {
-            self.with(|connection| {
-                let read = connection.unchecked_transaction()?;
-                native::check_mapping(&read, self.native)?;
-                let sequence = codec::header(&read, self.identity)?.sequence;
-                reclamation_epoch = tombstones::epoch(&read)?;
-                read.commit()?;
-                Ok(sequence)
+            self.with_admission(control, |connection| {
+                admission::read_header(
+                    connection,
+                    self.identity,
+                    self.native,
+                    control,
+                    |read, header| {
+                        reclamation_epoch = tombstones::epoch(read)?;
+                        Ok(header.sequence)
+                    },
+                )
             })
         })?;
         uqa_storage::mvcc::retain_record_snapshot(
@@ -512,7 +529,7 @@ impl VersionedPersistence for SQLiteRecordStore {
     fn reclaim_versions(&self, control: &StorageReadControl) -> VersionResult<u64> {
         self.snapshots.reclaim(control, |oldest| {
             self.metadata_snapshots.reclaim(control, |metadata_oldest| {
-                self.with_write(control, |connection| {
+                self.with_admission(control, |connection| {
                     reclamation::reclaim(
                         connection,
                         self.identity,
@@ -536,7 +553,7 @@ impl VersionedPersistence for SQLiteRecordStore {
             if oldest.is_some() {
                 return Ok(uqa_storage::mvcc::TombstoneReclamationStep::Retained);
             }
-            self.with_write(control, |connection| {
+            self.with_admission(control, |connection| {
                 tombstones::reclaim(connection, self.identity, self.native, request, control)
             })
         })
@@ -575,7 +592,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control.cancellation().check().map_err(VersionError::from)?;
         let _bindings = write::reserve_bindings(prepared, control)?;
         let publish = |deferred| {
-            self.with_write(control, |connection| {
+            self.with_admission(control, |connection| {
                 let _cache = commit_cache::CommitCache::grow(connection, prepared, control)?;
                 Ok(write::commit(
                     connection,
@@ -600,14 +617,18 @@ impl VersionedPersistence for SQLiteRecordStore {
     ) -> VersionResult<CommitStatus> {
         self.check_transaction(transaction)?;
         control.cancellation().check()?;
-        self.with(|connection| {
-            let read = connection.unchecked_transaction()?;
-            native::check_mapping(&read, self.native)?;
-            codec::header(&read, self.identity)?;
-            let status = codec::status(&read, transaction)?;
-            control.cancellation().check().map_err(VersionError::from)?;
-            read.commit()?;
-            Ok(status)
+        self.with_admission(control, |connection| {
+            admission::read_header(
+                connection,
+                self.identity,
+                self.native,
+                control,
+                |read, _| {
+                    let status = codec::status(read, transaction)?;
+                    control.check().map_err(VersionError::from)?;
+                    Ok(status)
+                },
+            )
         })
     }
 
@@ -617,7 +638,7 @@ impl VersionedPersistence for SQLiteRecordStore {
         control: &StorageReadControl,
     ) -> VersionResult<()> {
         self.check_transaction(acknowledgement.transaction())?;
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             receipts::acknowledge(connection, self.native, acknowledgement, control)
         })
     }
@@ -638,7 +659,7 @@ impl VersionedPersistence for SQLiteRecordStore {
                 "receipt acknowledgement owner mismatch",
             ));
         }
-        self.with_write(control, |connection| {
+        self.with_admission(control, |connection| {
             if owner.has_resolution_lease()
                 && receipts::validate_retained(connection, self.native, acknowledgement, control)?
             {

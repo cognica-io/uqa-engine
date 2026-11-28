@@ -92,7 +92,7 @@ impl ManagedAllocations {
             let id = StorageTransactionId::new(store.identity, lease.id().allocation())?;
             // A reserve cannot authorize a replaced/restored database or turn a
             // receipt changed through a raw physical API back into Pending.
-            store.read(|connection| {
+            store.read(control, |connection| {
                 if codec::status(connection, id)? != CommitStatus::Pending {
                     return Err(VersionError::TransactionSealed.into());
                 }
@@ -109,7 +109,7 @@ impl ManagedAllocations {
         let mut batch = Reserved::default();
         let mut owner = None;
         let allocation = store.with_receipt_capacity(control, |leases, capacity| {
-            store.with_write(control, |connection| {
+            store.with_admission(control, |connection| {
                 write::allocate_batch(
                     connection,
                     store.identity,

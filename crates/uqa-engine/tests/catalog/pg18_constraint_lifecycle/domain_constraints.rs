@@ -36,6 +36,49 @@ fn domain_defaults_match_postgresql_and_persistent_reopen(#[case] provider: usiz
     }
 }
 
+#[rstest::rstest]
+#[case::sqlite(1)]
+#[case::sqlite_key_value(2)]
+#[case::redb(3)]
+fn an_unrelated_commit_preserves_the_prepared_default_of_a_private_table(#[case] provider: usize) {
+    let directory = TempDir::new().unwrap();
+    let engine = open(provider, &directory.path().join("private-domain.db"));
+    let peer = engine.new_session().unwrap();
+    engine
+        .sql("CREATE TABLE unrelated(id integer)", &[])
+        .unwrap();
+    engine
+        .sql(
+            "BEGIN;
+             CREATE FUNCTION bound_default() RETURNS integer LANGUAGE sql IMMUTABLE AS 'SELECT 14';
+             CREATE DOMAIN written_number AS integer DEFAULT bound_default();
+             CREATE TABLE writes(id integer, v written_number);
+             PREPARE put(integer) AS INSERT INTO writes(id) VALUES($1) RETURNING v::integer AS v",
+            &[],
+        )
+        .unwrap();
+    peer.sql("INSERT INTO unrelated VALUES(1)", &[]).unwrap();
+    engine
+        .sql("ALTER DOMAIN written_number SET DEFAULT 25", &[])
+        .unwrap();
+    let first = engine.sql("EXECUTE put(1)", &[]).unwrap();
+    assert_eq!(first.rows[0]["v"], uqa_core::Value::Int(14));
+    engine
+        .sql(
+            "CREATE OR REPLACE FUNCTION bound_default() RETURNS integer
+             LANGUAGE sql IMMUTABLE AS 'SELECT 37'",
+            &[],
+        )
+        .unwrap();
+    let second = engine.sql("EXECUTE put(2)", &[]).unwrap();
+    assert_eq!(second.rows[0]["v"], uqa_core::Value::Int(25));
+    engine.sql("ROLLBACK", &[]).unwrap();
+    assert_eq!(
+        peer.sql("SELECT id FROM unrelated", &[]).unwrap().rows[0]["id"],
+        uqa_core::Value::Int(1)
+    );
+}
+
 #[test]
 fn host_prepared_write_keeps_only_the_defaults_it_uses() {
     use uqa_core::Value;

@@ -119,10 +119,7 @@ impl<'a> PreparedLookup<'a> {
                         .value
                         .map(|location| run.load_value(location, control))
                         .transpose()?;
-                    Ok(
-                        PreparedRecordWrite::from_shared(entry.key, entry.expected, value)
-                            .with_kind(entry.kind),
-                    )
+                    Ok(entry.into_write(value))
                 })
                 .transpose(),
         }
@@ -184,8 +181,7 @@ impl<'a> PreparedLookup<'a> {
                         .value
                         .map(|location| cursor.load_value(location, control))
                         .transpose()?;
-                    let write = PreparedRecordWrite::from_shared(entry.key, entry.expected, value)
-                        .with_kind(entry.kind);
+                    let write = entry.into_write(value);
                     if !visit(&write)? {
                         break;
                     }

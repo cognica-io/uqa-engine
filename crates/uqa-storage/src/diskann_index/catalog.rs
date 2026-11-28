@@ -11,7 +11,9 @@ use crate::vector_index::DiskANNIndexParams;
 use crate::{StorageBackendError, StorageBackendResult, VectorFieldSchema};
 
 mod identity;
+mod record;
 pub use identity::{resolve_scope, DiskANNIndexResolver, DiskANNIndexScope};
+pub use record::{bound_relation, require_current_records, DiskANNCatalogRecord};
 
 pub fn validate_field(
     fields: &[VectorFieldSchema],
