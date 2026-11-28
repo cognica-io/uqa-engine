@@ -101,3 +101,59 @@ fn native_expression_plan_input_preserves_original_arena_addresses() {
     assert!(ExpressionPlan::read_image(&mut bytes.as_slice(), &memory, &token).is_err());
     assert_eq!(memory.used(), 0);
 }
+
+#[test]
+fn native_query_images_preserve_projection_privilege_slots_and_legacy_framing() {
+    use crate::catalog::image::input::window_tests::read_windowed;
+    let memory = MemoryBudget::new(1 << 20);
+    let token = CancellationToken::new();
+    let mut source = query("SELECT (SELECT 11), (SELECT 22)");
+    let legacy = encode(&source);
+    let root_tag = 8 + 8 + 1 + 8;
+    assert_eq!(legacy[root_tag], 0);
+    let mut empty_extension = legacy[..root_tag].to_vec();
+    empty_extension.push(3);
+    empty_extension.extend(0u64.to_le_bytes());
+    empty_extension.extend_from_slice(&legacy[root_tag + 1..]);
+    assert!(QueryPlan::read_image(&mut empty_extension.as_slice(), &memory, &token).is_err());
+    assert_eq!(memory.used(), 0);
+    for slots in [vec![], vec![1], vec![0, 1], vec![1, 0], vec![0, 0], vec![2]] {
+        let RelationalPlan::QueryBlock(block) = &mut source.root else {
+            panic!("query block")
+        };
+        block.privilege_subqueries.clone_from(&slots);
+        let bytes = encode(&source);
+        if slots.is_empty() {
+            assert_eq!(bytes, legacy);
+        } else {
+            let mut expected = legacy[..root_tag].to_vec();
+            expected.push(3);
+            expected.extend((slots.len() as u64).to_le_bytes());
+            for slot in &slots {
+                expected.extend((*slot as u64).to_le_bytes());
+            }
+            expected.extend_from_slice(&legacy[root_tag + 1..]);
+            assert_eq!(bytes, expected);
+        }
+        let restored = QueryPlan::read_image(&mut bytes.as_slice(), &memory, &token);
+        if slots == [1, 0] || slots == [0, 0] || slots == [2] {
+            assert!(restored.is_err());
+        } else {
+            let restored = restored.unwrap();
+            let resumed = read_windowed(
+                QueryPlan::image_input(&memory, &token).unwrap(),
+                &bytes,
+                1,
+                1,
+            );
+            for value in [&*restored, &*resumed] {
+                let RelationalPlan::QueryBlock(block) = &value.root else {
+                    panic!("query block")
+                };
+                assert_eq!(block.privilege_subqueries, slots);
+                assert_eq!(encode(value), bytes);
+            }
+        }
+        assert_eq!(memory.used(), 0);
+    }
+}

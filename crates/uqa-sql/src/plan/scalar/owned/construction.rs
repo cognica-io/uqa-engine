@@ -7,7 +7,7 @@
 //! Scalar containers admit their own allocation without merging the independently movable children.
 
 use super::{
-    generated::{children_from, finish, owned_lowering},
+    generated::{children_from, finish, lowering_with_workspace},
     OwnedScalarExpr, Result, ScalarExpr, ScalarMemory,
 };
 use crate::{
@@ -41,12 +41,29 @@ impl OwnedScalarExpr {
         conjunction: bool,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
-        crate::catalog::work::inline(Self::boolean_from(children, conjunction, control, &mut ()))
+        Self::boolean_with_workspace(children, conjunction, control, control)
+    }
+
+    /// Charge the new boolean container to the operation while preserving its children's storage domain.
+    pub fn boolean_with_workspace(
+        children: impl ExactSizeIterator<Item = Self>,
+        conjunction: bool,
+        storage: &ProductionControl<'_>,
+        workspace: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        crate::catalog::work::inline(Self::boolean_from(
+            children,
+            conjunction,
+            storage,
+            workspace,
+            &mut (),
+        ))
     }
 
     pub(crate) async fn boolean_from<W: Work>(
         children: impl ExactSizeIterator<Item = Self>,
         conjunction: bool,
+        storage: &ProductionControl<'_>,
         control: &ProductionControl<'_>,
         work: &mut W,
     ) -> std::result::Result<Self, W::Error>
@@ -54,7 +71,7 @@ impl OwnedScalarExpr {
         W::Error: From<CatalogRetentionError>,
     {
         control.check()?;
-        let mut lowering = owned_lowering(control);
+        let mut lowering = lowering_with_workspace(storage, control);
         let items = children_from(&mut lowering, children, work).await?;
         let expression = if conjunction {
             ScalarExpr::And(items.take())
@@ -68,14 +85,13 @@ impl OwnedScalarExpr {
         lowering: &mut Lowering<'_>,
         child: Self,
     ) -> Result<ScalarExpr> {
-        let control = lowering
-            .control
-            .as_ref()
-            .map_or_else(ProductionControl::uncontrolled, |control| {
-                control.production
-            });
-        child.assert_owner(&control);
-        control.check()?;
+        let storage = if lowering.owned_children.is_some() {
+            lowering.production()
+        } else {
+            ProductionControl::uncontrolled()
+        };
+        child.assert_owner(&storage);
+        lowering.check()?;
         if let Some(children) = &mut lowering.owned_children {
             children.reserve_children(1)?;
         }

@@ -17,7 +17,7 @@ use crate::{
         pages::{DiskANNMemorySource, DiskANNReadLimits, RecordInput},
         RetainedDiskANNIndex,
     },
-    image_io::{ImageOutput, ImageRead, ImageReader},
+    image_io::{write_from_cursor, ImageReader},
     read_control::StorageReadControl,
     vector_index::image::{invalid, Input, VectorImageSnapshot, VectorImageSource},
     StorageBackendResult,
@@ -47,25 +47,8 @@ pub(super) fn write(
     writer: &mut dyn std::io::Write,
     control: &StorageReadControl,
 ) -> StorageBackendResult<u64> {
-    let mut cursor = stream::DiskANNImageCursor::new(index, physical, options, original, control)?;
-    while !cursor.prepare(128)?.ready {}
-    crate::image_io::with_retained_control(writer, Some(original), |writer| {
-        let mut out = ImageOutput {
-            writer,
-            control,
-            written: 0,
-        };
-        let mut buffer = [0; 4096];
-        loop {
-            let count = cursor.read(&mut buffer)?;
-            if count == 0 {
-                break;
-            }
-            out.bytes(&buffer[..count])?;
-        }
-        control.check()?;
-        Ok(out.written)
-    })
+    let cursor = stream::DiskANNImageCursor::new(index, physical, options, original, control)?;
+    write_from_cursor(cursor, writer, control, Some(original))
 }
 
 pub(crate) async fn read(

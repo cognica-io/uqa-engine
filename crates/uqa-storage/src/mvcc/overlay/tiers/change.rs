@@ -75,7 +75,7 @@ impl TieredChange<'_> {
 
     pub(in crate::mvcc::overlay) fn identity(&self) -> PrivateRecordRevision {
         match self {
-            Self::Resident(change) => change.identity,
+            Self::Resident(change) => change.identity(),
             Self::Spilled { entry, .. } => entry.identity,
         }
     }
@@ -92,10 +92,7 @@ impl TieredChange<'_> {
                     .value
                     .map(|location| run.load_value(location, control))
                     .transpose()?;
-                Ok(
-                    PreparedRecordWrite::from_shared(entry.key.clone(), entry.expected, value)
-                        .with_kind(entry.kind),
-                )
+                Ok(entry.clone().into_write(value))
             }
         }
     }

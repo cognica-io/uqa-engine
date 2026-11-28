@@ -100,9 +100,7 @@ fn qualifier_filter_for_part(
 fn derived_disjunctive_qualifier_filters(
     context: FilterPushdownContext<'_>,
     part: &ScalarExpr,
-    _: &BTreeSet<String>,
     columns: &SourceColumns,
-    subqueries: &[QueryPlan],
 ) -> Vec<(String, ScalarExpr)> {
     let control = uqa_core::memory::ProductionControl::uncontrolled();
     let mut output = Vec::new();
@@ -110,7 +108,6 @@ fn derived_disjunctive_qualifier_filters(
         context,
         part,
         columns,
-        subqueries,
         &control,
         &mut |qualifier, expression| {
             output.push((

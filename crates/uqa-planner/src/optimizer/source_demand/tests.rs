@@ -5,8 +5,10 @@
 //
 
 use super::*;
+use crate::UnifiedPlan;
 use std::sync::Arc;
 use uqa_core::Value;
+use uqa_sql::plan::AnalyzedSource;
 use uqa_sql::{ast::InternalRelationId, ColumnType, RowSchema, ScalarExpr};
 mod control;
 mod joins;
@@ -26,18 +28,19 @@ fn hidden_captured_outputs_follow_physical_demand() {
         RowSchema::with_internal_relation_types(relation, vec![Some(ColumnType::Integer); 2]);
     assert_eq!(schema.len(), 0);
     assert_eq!(schema.physical_width(), 2);
-    let mut plan = query("SELECT 7, 1/0");
+    let plan = query("SELECT 7, 1/0");
     let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
+        storage: ProductionControl::uncontrolled(),
         ctes: None,
     };
     let mut demand = Demand::new(config.production);
     demand.extend([0]).unwrap();
-    context
+    let plan = context
         .outputs(
-            &mut plan,
+            MutableQueryPlan::uncontrolled(*plan),
             &AnalyzedSource {
                 schema,
                 children: None,
@@ -46,7 +49,7 @@ fn hidden_captured_outputs_follow_physical_demand() {
             Some(relation),
         )
         .unwrap();
-    let RelationalPlan::QueryBlock(block) = plan.root else {
+    let RelationalPlan::QueryBlock(block) = &plan.root else {
         panic!("block")
     };
     assert_eq!(
@@ -115,26 +118,26 @@ fn join_lateral_scope_preserves_captured_input_used_only_by_its_right_child() {
         })
         .into(),
     );
-    let mut plan = UnifiedPlan::Query(plan);
-    prune(
-        &mut plan,
+    let plan = prune(
+        MutableExecutablePlan::uncontrolled(UnifiedPlan::Query(plan)),
         &OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control),
         &|_: &str| false,
+        ProductionControl::uncontrolled(),
     )
     .unwrap();
-    let UnifiedPlan::Query(plan) = plan else {
+    let MutableExecutablePlan::Query(plan) = plan else {
         panic!("query")
     };
-    let RelationalPlan::QueryBlock(block) = plan.root else {
+    let RelationalPlan::QueryBlock(block) = &plan.root else {
         panic!("block")
     };
-    let Some(SourcePlan::Join { left, .. }) = block.from else {
+    let Some(SourcePlan::Join { left, .. }) = &block.from else {
         panic!("join")
     };
-    let SourcePlan::Subquery { body, .. } = *left else {
+    let SourcePlan::Subquery { body, .. } = &**left else {
         panic!("left")
     };
-    let RelationalPlan::QueryBlock(block) = body.root else {
+    let RelationalPlan::QueryBlock(block) = &body.root else {
         panic!("block")
     };
     assert_eq!(

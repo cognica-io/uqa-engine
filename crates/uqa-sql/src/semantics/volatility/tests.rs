@@ -4,27 +4,11 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::BuiltinVolatilityCatalog as EmptyCatalog;
 use super::{
     expr_contains_volatile_function, FunctionBinding, FunctionVolatility, QueryPlan, SQLError,
     ScalarExpr, VolatilityCatalog,
 };
-
-struct EmptyCatalog;
-impl VolatilityCatalog for EmptyCatalog {
-    fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
-        None
-    }
-    fn routine_volatilities(
-        &self,
-        _: &str,
-        _: Option<&FunctionBinding>,
-    ) -> Option<Vec<FunctionVolatility>> {
-        None
-    }
-    fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
-        Ok(None)
-    }
-}
 
 #[test]
 fn external_cte_names_do_not_leak_into_catalog_view_definitions() {

@@ -75,6 +75,7 @@ impl QueryPlan {
         let block = QueryBlockPlan {
             deferred_outer_rewrites: Vec::new(),
             privilege_columns: OwnedSet::new(),
+            privilege_subqueries: Vec::new(),
             projections: Vec::new(),
             from: None,
             r#where: None,

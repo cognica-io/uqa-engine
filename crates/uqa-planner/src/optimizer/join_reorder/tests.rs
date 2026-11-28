@@ -4,7 +4,17 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
+use super::output::CallerPredicates;
 use super::*;
+use uqa_sql::plan::{MutableExecutablePlan, OwnedExecutablePlan};
+
+fn reorder_unified_plan_joins(
+    plan: UnifiedPlan,
+    statistics: &dyn SourceStatistics,
+    work: &ProductionControl<'_>,
+) -> OptimizerResult<OwnedExecutablePlan> {
+    traversal::reorder_caller_plan(MutableExecutablePlan::uncontrolled(plan), statistics, work)
+}
 
 mod admission;
 mod bindings;
@@ -75,9 +85,20 @@ fn unavailable_function_cost_does_not_copy_join_predicates() {
             *on = Some(predicate);
         }
         let control = ProductionControl::uncontrolled();
-        let mut rewrite = JoinRewrite::new(plan, &control);
+        let plan = MutableExecutablePlan::uncontrolled(plan);
+        let mut output = Output::new(&control);
+        let mut selected = None;
         let allocation = allocation_counter::measure(|| {
-            rewrite.run(&|_: &str| None, &control).unwrap();
+            selected = Some(
+                traversal::reorder(
+                    plan,
+                    &|_: &str| None,
+                    &control,
+                    &ProductionControl::uncontrolled(),
+                    &mut CallerPredicates::new(&mut output),
+                )
+                .unwrap(),
+            );
         });
         assert!(
             allocation.bytes_total < 4096,
@@ -208,9 +229,40 @@ fn reordered_inner_join_source(
     control: &ProductionControl<'_>,
 ) -> OptimizerResult<Option<SelectedSource>> {
     let mut output = Output::new(control);
-    let source = rewrite_inner_join_source(source, external, statistics, control, &mut output)?;
-    Ok(source.map(|source| SelectedSource {
+    let mut predicates = CallerPredicates::new(&mut output);
+    let Some(prepared) = super::materialization::PreparedJoin::select(
         source,
+        external,
+        statistics,
+        control,
+        &mut predicates,
+    )?
+    else {
+        return Ok(None);
+    };
+    let original = std::mem::replace(
+        source,
+        SourcePlan::Table {
+            name: String::new(),
+            executable_query: None,
+            qualifier: String::new(),
+            alias: None,
+            column_aliases: Vec::new(),
+            bound_columns: None,
+            include_descendants: true,
+        },
+    );
+    let storage = ProductionControl::uncontrolled();
+    let plan = prepared.assemble(
+        uqa_sql::plan::MutableSourcePlan::uncontrolled(original),
+        &mut predicates,
+        &storage,
+    )?;
+    Ok(Some(SelectedSource {
+        source: plan
+            .finish(&storage)?
+            .into_uncontrolled()
+            .expect("caller-owned source"),
         _memory: output.finish(),
     }))
 }

@@ -8,8 +8,10 @@
 
 use uqa_core::memory::{Produced, ProductionControl};
 use uqa_sql::ast::{BinaryOp, ColumnType, FunctionBinding, FunctionVolatility};
+#[cfg(test)]
+use uqa_sql::scalar_type;
 use uqa_sql::SQLError;
-use uqa_sql::{scalar_type, FunctionTypeResolver, RowSchema, ScalarExpr};
+use uqa_sql::{FunctionTypeResolver, RowSchema, ScalarExpr};
 
 use super::Value;
 
@@ -26,23 +28,6 @@ pub(crate) fn retain_computed_integer_owned(
 ) -> Result<uqa_sql::plan::OwnedScalarExpr, SQLError> {
     metadata::retain_computed_integer(expression, parameter_index, control)
 }
-pub(super) use composites::fold_composite_constructor;
-
-/// Eliminating a CASE, COALESCE or function call must not turn its record result into ROW comparison syntax.
-pub(super) fn retain_record_result(expression: ScalarExpr, row_syntax: bool) -> ScalarExpr {
-    let control = ProductionControl::uncontrolled();
-    metadata::retain_record_result(
-        uqa_sql::plan::OwnedScalarExpr::uncontrolled(expression),
-        row_syntax,
-        &control,
-    )
-    .expect("ordinary record result metadata")
-    .finish(&control)
-    .expect("ordinary record result")
-    .into_uncontrolled()
-    .expect("ordinary record owner")
-}
-
 pub(crate) fn retain_computed_integer(
     expression: ScalarExpr,
     parameter_index: Option<usize>,
@@ -101,74 +86,11 @@ pub(super) fn literal_value_with_control<'a>(
     })
 }
 
-pub(super) fn retain_large_literal(
-    expression: ScalarExpr,
-    storage: Option<&dyn uqa_sql::ir::ConstantValueStorage>,
-) -> Result<ScalarExpr, SQLError> {
-    let Some(storage) = storage else {
-        return Ok(expression);
-    };
-    let (value, selected) = match &expression {
-        ScalarExpr::TypedLiteral {
-            value,
-            bound_type: Some(ty),
-            parameter_index: None,
-            composite_source: None,
-            ..
-        } => (value, Some(ty)),
-        ScalarExpr::Literal(value) => (value, None),
-        _ => return Ok(expression),
-    };
-    // Inline payload is bounded by one IR node. Large VALUES datums share the statement's byte-bounded owner instead of accumulating in every plan copy.
-    let cancellation = uqa_sql::expr::statement_cancellation().unwrap_or_default();
-    let bytes = value.retained_payload_bytes(
-        &uqa_core::memory::MemoryBudget::new(usize::MAX),
-        &cancellation,
-    )?;
-    if bytes <= size_of::<ScalarExpr>()
-        || uqa_sql::expr::composites::literal::contains_records(value)
-        || uqa_sql::expr::datums::contains_datum(value)
-    {
-        return Ok(expression);
-    }
-    let inferred;
-    let ty = if let Some(ty) = selected {
-        ty
-    } else {
-        inferred = scalar_type(&expression, &RowSchema::default(), &[])?;
-        let Some(ty) = inferred.as_ref() else {
-            return Ok(expression);
-        };
-        ty
-    };
-    if uqa_sql::type_resolution::pg_catalog_builtin_type(&ty.catalog_name()).as_ref() != Some(ty) {
-        return Ok(expression);
-    }
-    let ty = ty.clone();
-    let (value, declaration, collation_oid) = match expression {
-        ScalarExpr::TypedLiteral {
-            value,
-            ty,
-            collation_oid,
-            ..
-        } => (value, Some(ty), collation_oid),
-        ScalarExpr::Literal(value) => (value, None, None),
-        _ => unreachable!("selected literal"),
-    };
-    Ok(ScalarExpr::RetainedLiteral(
-        uqa_sql::ir::RetainedScalarLiteral::new(
-            storage.retain(value)?,
-            Some(ty),
-            declaration,
-            collation_oid,
-        ),
-    ))
-}
-
 pub(super) fn is_coalesce(name: &str, binding: Option<&FunctionBinding>) -> bool {
     name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin)
 }
 
+#[cfg(test)]
 fn is_constant(
     expression: &ScalarExpr,
     types: Option<&dyn uqa_sql::routines::declaration::RoutineTypeCatalog>,
@@ -186,20 +108,6 @@ fn is_constant(
 fn immutable_literal(value: &Value) -> bool {
     !uqa_sql::expr::composites::literal::contains_records(value)
         && !uqa_sql::expr::datums::contains_datum(value)
-}
-
-fn constant_scalar_type(
-    expression: &ScalarExpr,
-    resolver: Option<&dyn FunctionTypeResolver>,
-) -> Result<Option<ColumnType>, SQLError> {
-    Ok(
-        eligibility::scalar_type(expression, resolver, &ProductionControl::uncontrolled())?.map(
-            |ty| {
-                ty.into_uncontrolled()
-                    .expect("ordinary constant result type")
-            },
-        ),
-    )
 }
 
 #[cfg(test)]
@@ -231,6 +139,7 @@ pub(super) fn fold_authorized_literal(
     )
 }
 
+#[cfg(test)]
 pub(super) fn fold_selected_literal(
     expression: ScalarExpr,
     evaluate: impl Fn(&ScalarExpr, &ProductionControl<'_>) -> Result<Produced<Value>, SQLError>,
@@ -240,184 +149,21 @@ pub(super) fn fold_selected_literal(
     result_type: Option<&ColumnType>,
     config: &crate::OptimizerConfig<'_>,
 ) -> Result<ScalarExpr, SQLError> {
-    if matches!(&expression, ScalarExpr::Func { binding: Some(binding), .. }
-        if matches!(binding.dispatch, Some(uqa_sql::ast::FunctionDispatch::NamedArgument | uqa_sql::ast::FunctionDispatch::VariadicArgument)))
-    {
-        // Argument markers carry syntax for their enclosing call; only that call evaluates them as arguments.
-        return Ok(expression);
-    }
-    if let Some(domain) = domains::fold(&expression, config)? {
-        let (ty, _owner) = domain.ty.into_parts();
-        return ordinary_result(domain.value, Some(ty), true, config);
-    }
-    if let ScalarExpr::Cast { expr, ty, .. } = &expression {
-        if literal_value_with_control(expr, &config.production)?
-            .as_deref()
-            .is_some_and(|value| matches!(value, Value::Null))
-        {
-            if let Some(target) = eligibility::direct_null_cast_type(ty, types, &config.production)?
-            {
-                return Ok(ScalarExpr::TypedLiteral {
-                    collation_oid: None,
-                    composite_source: None,
-                    value: Value::Null,
-                    ty: ty.clone(),
-                    bound_type: Some(target.into_parts().0),
-                    parameter_index: None,
-                });
-            }
-        }
-    }
-    if let Some(literal) = composites::fold_field(&expression, types, &config.production) {
-        return literal;
-    }
-    let strict_null = strict_null_expression(&expression, &config.production)?;
-    if matches!(expression, ScalarExpr::RetainedLiteral(_))
-        || literal_value_with_control(&expression, &config.production)?.is_some()
-        || (!strict_null && !is_constant(&expression, types, resolver))
-        || (strict_null && arithmetic_needs_result_type(&expression, result_type))
-    {
-        return Ok(expression);
-    }
-    let schema = RowSchema::default();
-    let selected_type = strict_null_result_type(&expression, strict_null)?;
-    let ty = match result_type.cloned().or(selected_type) {
-        Some(ty) => Some(ty),
-        None => constant_scalar_type(&expression, resolver)?,
-    };
-    // Keep operator-selected casts before evaluation can replace the expression with a literal, including PostgreSQL unknown string inputs.
-    let expression = match resolver {
-        Some(resolver) => {
-            uqa_sql::bind_type_introspection_with_resolver(expression, &schema, &[], resolver)
-        }
-        None => uqa_sql::bind_type_introspection(expression, &schema, &[]),
-    };
-    let value = if strict_null {
-        // PostgreSQL simplifies a strict NULL call without looking up its function execution permission.
-        config
-            .production
-            .finish(Value::Null, config.production.empty_reservation())?
-    } else {
-        if let (
-            Some(permissions),
-            ScalarExpr::Func {
-                binding: Some(binding),
-                ..
-            },
-        ) = (permissions, &expression)
-        {
-            permissions.require_execute(binding)?;
-        }
-        evaluate(&expression, &config.production)?
-    };
-    let (value, memory) = value.into_parts();
-    let literal = ScalarExpr::Literal(value);
-    // Computed integers are not ORDER BY positions, and computed strings are not fresh unknown literals. Preserve their resolved types when replacing the expression.
-    let untyped = !matches!(literal, ScalarExpr::Literal(Value::Int(_) | Value::Str(_)))
-        && !matches!(expression, ScalarExpr::Cast { .. })
-        && constant_scalar_type(&literal, resolver)? == ty;
-    let ScalarExpr::Literal(value) = literal else {
-        unreachable!("evaluated literal")
-    };
-    let value = config.production.finish(value, memory)?;
-    ordinary_result(value, ty, !untyped, config)
-}
-
-fn ordinary_result(
-    value: Produced<Value>,
-    ty: Option<ColumnType>,
-    declared: bool,
-    config: &crate::OptimizerConfig<'_>,
-) -> Result<ScalarExpr, SQLError> {
-    if config.production.budget().is_some() && value.reserved_bytes() > 0 {
-        return retain_produced_literal(value, ty, declared, config);
-    }
-    // The ordinary result, or an inline scalar with an empty lease, owns no controlled allocation after this move.
-    let (value, memory) = value.into_parts();
-    drop(memory);
-    if !declared {
-        return Ok(ScalarExpr::Literal(value));
-    }
-    Ok(match ty {
-        Some(ty) => ScalarExpr::TypedLiteral {
-            collation_oid: None,
-            composite_source: None,
-            value,
-            ty: ty.catalog_name(),
-            bound_type: Some(ty),
-            parameter_index: None,
-        },
-        None => ScalarExpr::Literal(value),
-    })
-}
-
-fn retain_produced_literal(
-    value: Produced<Value>,
-    ty: Option<ColumnType>,
-    declared: bool,
-    config: &crate::OptimizerConfig<'_>,
-) -> Result<ScalarExpr, SQLError> {
-    use uqa_sql::ir::{RetainedConstantValue, RetainedScalarLiteral};
-    let control = &config.production;
-    let declaration = if declared {
-        ty.as_ref()
-            .map(|ty| ty.catalog_name_with_control(control))
-            .transpose()?
-    } else {
-        None
-    };
-    let retained_type = ty
-        .as_ref()
-        .map(|ty| ty.clone_with_control(control))
-        .transpose()?;
-    let storage = config.constant_storage.as_deref().filter(|_| {
-        config.retain_values_constants
-            && value.reserved_bytes() > size_of::<ScalarExpr>()
-            && !uqa_sql::expr::composites::literal::contains_records(&value)
-            && !uqa_sql::expr::datums::contains_datum(&value)
-            && ty.as_ref().is_some_and(|ty| {
-                uqa_sql::type_resolution::pg_catalog_builtin_type(&ty.catalog_name()).as_ref()
-                    == Some(ty)
-            })
-    });
-    let value = if let Some(storage) = storage {
-        // The spill owner publishes the complete value while its production lease is still live. Only then can the transient decoded payload and its lease be released.
-        storage.retain_produced(value, control)?
-    } else {
-        RetainedConstantValue::from_produced(value, control)?
-    };
-    Ok(ScalarExpr::RetainedLiteral(
-        RetainedScalarLiteral::with_control(value, retained_type, declaration, None, control)?,
-    ))
-}
-
-fn strict_null_result_type(
-    expression: &ScalarExpr,
-    strict_null: bool,
-) -> Result<Option<ColumnType>, SQLError> {
-    Ok(match expression {
-        // An analyzed comparison has boolean output even when its discarded operand needs a live catalog to resolve its retained type name.
-        ScalarExpr::Binary {
-            op:
-                BinaryOp::Equal
-                | BinaryOp::NotEqual
-                | BinaryOp::Less
-                | BinaryOp::LessEqual
-                | BinaryOp::Greater
-                | BinaryOp::GreaterEqual,
-            ..
-        } if strict_null => Some(ColumnType::Boolean),
-        ScalarExpr::Func {
-            binding: Some(binding),
-            ..
-        } if strict_null => {
-            if let Some(error) = &binding.resolution_error {
-                return Err(error.sql_error());
-            }
-            uqa_sql::type_resolution::fixed_builtin_return_type(binding)
-        }
-        _ => None,
-    })
+    let production = super::ScalarProduction::caller(config);
+    let expression = uqa_sql::plan::OwnedScalarExpr::uncontrolled(expression);
+    let output = owned::fold_selected(
+        expression,
+        result_type,
+        production,
+        permissions,
+        types,
+        resolver,
+        evaluate,
+    )?;
+    Ok(output
+        .finish(&production.storage)?
+        .into_uncontrolled()
+        .expect("caller-owned scalar"))
 }
 
 fn arithmetic_needs_result_type(expression: &ScalarExpr, result_type: Option<&ColumnType>) -> bool {

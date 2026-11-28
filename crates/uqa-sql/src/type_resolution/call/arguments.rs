@@ -79,7 +79,7 @@ impl<'a> Arguments<'a> {
         if array {
             OwnedScalarExpr::array_from(children, &self.control, work).await
         } else {
-            OwnedScalarExpr::boolean_from(children, false, &self.control, work).await
+            OwnedScalarExpr::boolean_from(children, false, &self.control, &self.control, work).await
         }
     }
 }

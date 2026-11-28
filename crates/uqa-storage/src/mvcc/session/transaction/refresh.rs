@@ -48,14 +48,22 @@ impl Transaction {
         )?;
         let records = resolved.as_ref().unwrap_or(&prepared);
         validation::validate(records, current.as_ref(), control)?;
-        let changes = PrivateRecordChanges::from_prepared(
-            records,
-            persistence.private_revision_scope(),
-            control,
-        )?;
-        changes.inherit_retained_sources(&self.changes, control)?;
+        let changes = resolved
+            .as_ref()
+            .map(|resolved| {
+                let changes = PrivateRecordChanges::from_prepared(
+                    resolved,
+                    persistence.private_revision_scope(),
+                    control,
+                )?;
+                changes.inherit_retained_sources(&self.changes, control)?;
+                Ok::<_, super::VersionError>(changes)
+            })
+            .transpose()?;
         control.check()?;
-        self.changes = changes;
+        if let Some(changes) = changes {
+            self.changes = changes;
+        }
         self.committed = current;
         Ok(())
     }

@@ -6,6 +6,9 @@
 
 //! Key/Value image admission preserves its mapping and excludes delivery authority.
 
+mod driver;
+pub use driver::{KeyValueImageImportDriver, KeyValueImageWriter};
+
 use crate::{
     backup::{
         BackupCut, BackupError, BackupLeaseInput, BackupRecordImportMapping, BackupResult,

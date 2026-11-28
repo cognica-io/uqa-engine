@@ -13,6 +13,128 @@ use std::path::Path;
 mod process;
 mod tombstones;
 
+#[test]
+fn reclaiming_two_histories_uses_bounded_statements_among_single_version_heads() {
+    use std::sync::atomic::Ordering;
+
+    for size in [32_u64, 256] {
+        let connection = ManagedConnection::open_in_memory().unwrap();
+        let store = SQLiteRecordStore::new(&connection).unwrap();
+        let control = control();
+        let keys = (0..size)
+            .map(|id| (2 * id).to_be_bytes())
+            .collect::<Vec<_>>();
+        let writes = keys
+            .iter()
+            .map(|key| RecordWrite {
+                key,
+                expected: None,
+                value: Some(b"original"),
+            })
+            .collect::<Vec<_>>();
+        let original = PreparedRecordCommit::new(&writes, &control).unwrap();
+        let first = store
+            .commit(
+                store.allocate_transaction(&control).unwrap(),
+                &original,
+                &control,
+            )
+            .unwrap();
+        let old = store.snapshot(&control).unwrap();
+        let changes = [
+            RecordWrite {
+                key: &keys[0],
+                expected: Some(first.sequence),
+                value: Some(b"updated"),
+            },
+            RecordWrite {
+                key: &keys[1],
+                expected: Some(first.sequence),
+                value: None,
+            },
+        ];
+        let update = PreparedRecordCommit::new(&changes, &control).unwrap();
+        store
+            .commit(
+                store.allocate_transaction(&control).unwrap(),
+                &update,
+                &control,
+            )
+            .unwrap();
+        assert_eq!(store.reclaim_versions(&control).unwrap(), 0);
+        assert_eq!(
+            &***old
+                .get(&keys[1], &control)
+                .unwrap()
+                .unwrap()
+                .value()
+                .unwrap(),
+            b"original"
+        );
+        drop(old);
+
+        let selects = observe_selects(&connection);
+        assert_eq!(store.reclaim_versions(&control).unwrap(), 2);
+        let count = selects.load(Ordering::Relaxed);
+        assert!(
+            (1..=64).contains(&count),
+            "{size} heads used {count} SELECTs"
+        );
+        assert_eq!(store.reclaim_versions(&control).unwrap(), 0);
+        let current = store.snapshot(&control).unwrap();
+        assert_eq!(
+            &***current
+                .get(&keys[0], &control)
+                .unwrap()
+                .unwrap()
+                .value()
+                .unwrap(),
+            b"updated"
+        );
+        assert!(current
+            .get(&keys[1], &control)
+            .unwrap()
+            .unwrap()
+            .value()
+            .is_none());
+        assert_eq!(
+            &***current
+                .get(keys.last().unwrap(), &control)
+                .unwrap()
+                .unwrap()
+                .value()
+                .unwrap(),
+            b"original"
+        );
+    }
+}
+
+fn observe_selects(
+    connection: &ManagedConnection,
+) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    let selects = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&selects);
+    connection
+        .with_physical(|sqlite| {
+            sqlite.set_prepared_statement_cache_capacity(0);
+            sqlite.authorizer(Some(move |context: AuthContext<'_>| {
+                if matches!(context.action, AuthAction::Select) {
+                    observed.fetch_add(1, Ordering::Relaxed);
+                }
+                Authorization::Allow
+            }))?;
+            Ok(())
+        })
+        .unwrap();
+    selects
+}
+
 pub(super) fn open(path: &Path, mode: usize) -> ManagedConnection {
     match mode {
         0 => ManagedConnection::open(path),

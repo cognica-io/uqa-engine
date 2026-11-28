@@ -5,6 +5,8 @@
 //
 
 use super::*;
+use crate::optimizer::OptimizerConfig;
+use uqa_core::memory::ProductionControl;
 use uqa_sql::{
     ast::{FunctionBinding, FunctionVolatility},
     plan::QueryPlan,
@@ -47,9 +49,93 @@ fn query(sql: &str) -> QueryPlan {
     *query
 }
 
+fn block_of(query: &QueryPlan) -> &QueryBlockPlan {
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        panic!("block")
+    };
+    block
+}
+
+fn propagate_view<'a>(query: &'a mut QueryPlan, views: &Views) -> &'a QueryBlockPlan {
+    let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
+    propagate_caller(query, None, Some(views), &config).unwrap();
+    block_of(query)
+}
+
+fn propagate_caller(
+    query: &mut QueryPlan,
+    types: Option<&dyn RoutineTypeCatalog>,
+    views: Option<&dyn VolatilityCatalog>,
+    config: &crate::optimizer::OptimizerConfig<'_>,
+) -> Result<(), SQLError> {
+    query
+        .edit_uncontrolled(|query| propagate(query, types, views, ScalarProduction::caller(config)))
+}
+
+#[test]
+fn caller_owned_source_substitution_charges_new_constants_and_preserves_unrelated_payloads() {
+    use uqa_core::{memory::MemoryBudget, CancellationToken, Value};
+
+    for (limit, cancel_original, cancel_invoking) in [
+        (0, false, false),
+        (32 * 1024, false, false),
+        (32 * 1024, true, false),
+        (32 * 1024, false, true),
+    ] {
+        let mut plan = query("SELECT s.x, 0 AS untouched FROM (VALUES (17)) s(x)");
+        let RelationalPlan::QueryBlock(block) = &mut plan.root else {
+            panic!("block")
+        };
+        let text = "x".repeat(1 << 20);
+        let text_pointer = text.as_ptr();
+        let projection_pointer = block.projections.as_ptr();
+        block.projections[1].expr = ScalarExpr::Literal(Value::Str(text));
+        let budget = MemoryBudget::new(limit);
+        let original = CancellationToken::new();
+        let invoking = CancellationToken::new();
+        let mut config = super::super::OptimizerConfig::new(
+            uqa_execution::scalar::eval_constant_scalar_with_control,
+        );
+        config.production = ProductionControl::new(&budget, &original, &invoking);
+        if cancel_original {
+            original.cancel();
+        }
+        if cancel_invoking {
+            invoking.cancel();
+        }
+        let result = propagate_caller(&mut plan, None, None, &config);
+        if limit == 0 || cancel_original || cancel_invoking {
+            assert_eq!(
+                result.unwrap_err().sqlstate(),
+                Some(if limit == 0 { "53200" } else { "57014" })
+            );
+        } else {
+            result.unwrap();
+            let RelationalPlan::QueryBlock(block) = &plan.root else {
+                panic!("block")
+            };
+            assert_eq!(block.projections.as_ptr(), projection_pointer);
+            assert_eq!(block.projections[0].alias.as_deref(), Some("x"));
+            assert!(matches!(
+                block.projections[0].expr,
+                ScalarExpr::TypedLiteral {
+                    value: Value::Int(17),
+                    ..
+                }
+            ));
+            let ScalarExpr::Literal(Value::Str(text)) = &block.projections[1].expr else {
+                panic!("unrelated literal")
+            };
+            assert_eq!(text.as_ptr(), text_pointer);
+            assert!(budget.peak() > 0);
+        }
+        assert_eq!(budget.used(), 0);
+    }
+}
+
 #[test]
 fn retained_source_constants_preserve_propagation_and_grouping() {
-    use uqa_core::{memory::ProductionControl, Value};
+    use uqa_core::Value;
     use uqa_sql::ir::{RetainedConstantValue, RetainedScalarLiteral};
     let control = ProductionControl::uncontrolled();
     let retained = ScalarExpr::RetainedLiteral(RetainedScalarLiteral::new(
@@ -72,14 +158,22 @@ fn retained_source_constants_preserve_propagation_and_grouping() {
     ] {
         let values = [expression.clone()];
         let constants = constants_from_values(&values, |_| "x".into(), None);
-        assert_eq!(constants["x"].as_ref(), Some(&retained));
+        assert_eq!(
+            constants.get("x").map(std::ops::Deref::deref),
+            Some(&retained)
+        );
         let mut plan = query("SELECT count(*) FROM (SELECT 1 WHERE false) s GROUP BY true");
         let RelationalPlan::QueryBlock(block) = &mut plan.root else {
             panic!("block")
         };
         let source = serde_json::to_value(&block.from).unwrap();
         block.group_by = vec![expression];
-        simplify_constant_group(block, None);
+        let config = OptimizerConfig::new(uqa_execution::scalar::eval_constant_scalar_with_control);
+        plan.edit_uncontrolled(|query| {
+            simplify_group(query, None, ScalarProduction::caller(&config))
+        })
+        .unwrap();
+        let block = block_of(&plan);
         assert_eq!(block.group_by, [ScalarExpr::Literal(Value::Bool(true))]);
         assert_eq!(serde_json::to_value(&block.from).unwrap(), source);
     }
@@ -107,7 +201,7 @@ fn view_constants_keep_source_authority_cardinality_and_visible_aliases() {
         };
         *bound_columns = Some(vec!["catalog_column".into()]);
         let source = serde_json::to_value(&block.from).unwrap();
-        propagate_source_constants(block, None, Some(&views)).unwrap();
+        let block = propagate_view(&mut plan, &views);
         assert!(matches!(
             block.projections[0].expr,
             ScalarExpr::TypedLiteral {
@@ -132,8 +226,8 @@ fn volatile_view_outputs_and_ordinary_tables_are_not_substituted() {
             panic!("query block")
         };
         let before = serde_json::to_value(&*block).unwrap();
-        propagate_source_constants(block, None, Some(&views)).unwrap();
-        assert_eq!(serde_json::to_value(&*block).unwrap(), before);
+        let block = propagate_view(&mut plan, &views);
+        assert_eq!(serde_json::to_value(block).unwrap(), before);
     }
 }
 
@@ -155,7 +249,7 @@ fn source_constants_preserve_resolved_unknown_output_types() {
             *bound_columns = Some(vec!["x".into()]);
         }
         let original_source = serde_json::to_value(&block.from).unwrap();
-        propagate_source_constants(block, None, Some(&views)).unwrap();
+        let block = propagate_view(&mut plan, &views);
         assert!(
             matches!(
                 &block.projections[0].expr,
@@ -194,9 +288,9 @@ fn view_constant_inspection_does_not_copy_unrelated_predicate_payloads() {
             };
             let source = serde_json::to_value(&block.from).unwrap();
             let allocations = allocation_counter::measure(|| {
-                propagate_source_constants(block, None, Some(&views)).unwrap();
+                propagate_view(&mut plan, &views);
             });
-            assert_eq!(serde_json::to_value(&block.from).unwrap(), source);
+            assert_eq!(serde_json::to_value(&block_of(&plan).from).unwrap(), source);
             (allocations.count_total, allocations.bytes_total)
         };
         assert_eq!(measure(1), measure(4 * 1024 * 1024), "{definition}");
@@ -228,7 +322,7 @@ fn borrowed_view_constants_keep_partial_aliases_and_ambiguous_output_names() {
         };
         *bound_columns = Some(columns.into_iter().map(String::from).collect());
         *column_aliases = aliases.into_iter().map(String::from).collect();
-        propagate_source_constants(block, None, Some(&views)).unwrap();
+        let block = propagate_view(&mut plan, &views);
         for (projection, expected) in block.projections.iter().zip(expected) {
             assert_eq!(
                 matches!(projection.expr, ScalarExpr::TypedLiteral { .. }),

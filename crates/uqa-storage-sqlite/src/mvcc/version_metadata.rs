@@ -6,9 +6,10 @@
 
 //! Keyed predecessor metadata addresses append-ordered payload records in the same transaction.
 
-use rusqlite::Connection;
+use rusqlite::{params, CachedStatement, Connection};
+use uqa_storage::{mvcc::CommitSequence, read_control::StorageReadControl};
 
-use super::{schema, PhysicalResult, VersionError};
+use super::{connection_functions::FingerprintScope, schema, PhysicalResult, VersionError};
 
 pub(super) const ADDRESSED_TABLE: &str = "CREATE TABLE _uqa_mvcc_version_metadata (key BLOB NOT NULL, sequence BLOB NOT NULL, version_id INTEGER NOT NULL CHECK(version_id > 0), payload_length INTEGER CHECK(payload_length IS NULL OR (typeof(payload_length) = 'integer' AND payload_length >= -1)), PRIMARY KEY(key, sequence)) WITHOUT ROWID";
 
@@ -39,21 +40,23 @@ pub(super) fn create_triggers(connection: &Connection) -> PhysicalResult<()> {
 }
 
 fn create_fingerprint_triggers(connection: &Connection, addressed: bool) -> PhysicalResult<()> {
-    for (_, definition) in PREVIOUS_TRIGGERS {
-        connection.execute_batch(&fingerprint_trigger(definition, addressed))?;
+    for (name, definition) in PREVIOUS_TRIGGERS {
+        if name == PREVIOUS_TRIGGERS[0].0 {
+            connection.execute_batch(&insert_digest_trigger(addressed))?;
+        } else {
+            connection.execute_batch(&fingerprint_trigger(definition, addressed))?;
+        }
     }
     Ok(())
 }
 
-pub(super) fn validate_triggers(
-    connection: &Connection,
-    addressed: bool,
-    fingerprints: bool,
-) -> PhysicalResult<()> {
+pub(super) fn validate_triggers(connection: &Connection, format: i64) -> PhysicalResult<()> {
     for (name, definition) in PREVIOUS_TRIGGERS {
-        let expected = if fingerprints {
-            fingerprint_trigger(definition, addressed)
-        } else if addressed {
+        let expected = if format >= 70 && name == PREVIOUS_TRIGGERS[0].0 {
+            insert_digest_trigger(true)
+        } else if format >= 69 {
+            fingerprint_trigger(definition, true)
+        } else if format >= 59 {
             addressed_trigger(definition)
         } else {
             definition.to_owned()
@@ -87,6 +90,28 @@ fn fingerprint_trigger(definition: &str, addressed: bool) -> String {
     definition.replace("INSERT INTO _uqa_mvcc_version_metadata VALUES", insert)
 }
 
+fn insert_digest_trigger(addressed: bool) -> String {
+    let (column, address) = if addressed {
+        ("version_id, ", "NEW.version_id, ")
+    } else {
+        ("", "")
+    };
+    format!("CREATE TRIGGER _uqa_mvcc_versions_INSERT_metadata AFTER INSERT ON _uqa_mvcc_versions BEGIN INSERT INTO _uqa_mvcc_version_metadata (key, sequence, {column}payload_length, image_digest) VALUES (NEW.key, NEW.sequence, {address}CASE WHEN NEW.value IS NULL THEN NULL WHEN typeof(NEW.value) = 'blob' THEN length(NEW.value) ELSE -1 END, __uqa_mvcc_image_digest(NEW.sequence, NEW.value)); END")
+}
+
+pub(super) fn upgrade_insert_digest(connection: &Connection) -> PhysicalResult<()> {
+    connection.execute_batch("DROP TRIGGER _uqa_mvcc_versions_INSERT_metadata")?;
+    connection.execute_batch(&insert_digest_trigger(true))?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn install_fingerprint_predecessor(connection: &Connection) -> PhysicalResult<()> {
+    connection.execute_batch("DROP TRIGGER _uqa_mvcc_versions_INSERT_metadata")?;
+    connection.execute_batch(&fingerprint_trigger(PREVIOUS_TRIGGERS[0].1, true))?;
+    Ok(())
+}
+
 pub(super) fn add_fingerprint_column(connection: &Connection) -> PhysicalResult<()> {
     add_fingerprint_column_for_layout(connection, true)
 }
@@ -103,6 +128,7 @@ fn add_fingerprint_column_for_layout(
     create_fingerprint_triggers(connection, addressed)
 }
 
+#[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub(super) fn set_image_digest(
     connection: &Connection,
     key: &[u8],
@@ -125,18 +151,40 @@ pub(super) fn set_image_digest(
     Ok(())
 }
 
-pub(super) fn retain_image_digest(
-    connection: &Connection,
-    key: &[u8],
-    revision: uqa_storage::mvcc::CommitSequence,
-    value: Option<&[u8]>,
-    control: &uqa_storage::read_control::StorageReadControl,
-) -> PhysicalResult<()> {
-    if let Some(value) = value {
-        let digest = uqa_storage::backup::RecordImageHasher::for_value(revision, value, control)?;
-        set_image_digest(connection, key, revision, digest)?;
+pub(super) struct VersionInsert<'a> {
+    statement: CachedStatement<'a>,
+    fingerprints: FingerprintScope,
+}
+
+impl<'a> VersionInsert<'a> {
+    pub(super) fn new(
+        connection: &'a Connection,
+        control: &StorageReadControl,
+    ) -> PhysicalResult<Self> {
+        let fingerprints = FingerprintScope::new(connection, control)?;
+        let statement = connection.prepare_cached(
+            "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
+        )?;
+        Ok(Self {
+            statement,
+            fingerprints,
+        })
     }
-    Ok(())
+
+    pub(super) fn insert(
+        &mut self,
+        key: &[u8],
+        sequence: CommitSequence,
+        value: Option<&[u8]>,
+    ) -> PhysicalResult<()> {
+        let result = self.statement.execute(params![
+            key,
+            sequence.as_u64().to_be_bytes().as_slice(),
+            value
+        ]);
+        self.statement.clear_bindings();
+        self.fingerprints.resolve(result)
+    }
 }
 
 #[cfg(test)]

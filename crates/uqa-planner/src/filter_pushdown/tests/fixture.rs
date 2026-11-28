@@ -23,6 +23,7 @@ use uqa_sql::{
 pub(super) struct Fixture {
     resolution: RelationNameResolution,
     table: TableDefinition,
+    pub(super) volatility_lookups: std::sync::atomic::AtomicUsize,
 }
 impl Fixture {
     pub(super) fn new() -> Self {
@@ -41,6 +42,7 @@ impl Fixture {
                 current_user: "postgres".into(),
                 lookup_mode: RelationLookupMode::Dynamic,
             },
+            volatility_lookups: std::sync::atomic::AtomicUsize::new(0),
             table: TableDefinition {
                 columns: Arc::new(definition.columns).into(),
                 columns_declared: true,
@@ -118,6 +120,8 @@ impl AnalysisCatalog for Fixture {
 }
 impl VolatilityCatalog for Fixture {
     fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+        self.volatility_lookups
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         None
     }
     fn routine_volatilities(

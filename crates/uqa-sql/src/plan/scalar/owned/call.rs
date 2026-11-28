@@ -17,6 +17,20 @@ use crate::{
 use uqa_core::memory::{Produced, ProductionControl};
 
 impl OwnedScalarExpr {
+    /// Rename a function call in place, retaining its argument buffers and selected binding.
+    pub fn replace_call_name(
+        self,
+        name: Produced<String>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Self> {
+        self.replace_text_field(name, control, |expression| {
+            let ScalarExpr::Func { name, .. } = expression else {
+                panic!("call name replacement requires a function call")
+            };
+            name
+        })
+    }
+
     /// Canonicalize a grouping identity's built-in spelling in its existing string buffer. Removing a prefix changes length, never retained capacity.
     pub(crate) fn canonicalize_call_name(
         mut self,

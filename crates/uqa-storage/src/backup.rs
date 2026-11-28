@@ -47,9 +47,10 @@ pub use repository::{
 
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
 pub use destination::{
-    BackupImageImportStep, BackupImageValidationStep, BackupImageValidationWork,
-    BackupImageValidator, BackupImportLimits, OwnedBackupImageValidation,
-    OwnedPersistentBackupImport, PersistentBackupImport, PersistentBackupTarget,
+    restored_database_path, BackupFileInput, BackupImageImportStep, BackupImageValidationStep,
+    BackupImageValidationWork, BackupImageValidator, BackupImportLimits,
+    OwnedBackupImageValidation, OwnedPersistentBackupImport, PersistentBackupImport,
+    PersistentBackupTarget,
 };
 pub use error::{BackupError, BackupResult};
 pub use frame::{read_frame, write_frame, BackupKey, FrameContext, FrameKind, Protection};
@@ -57,7 +58,10 @@ pub use functions::{
     BackupFunctionDigestJob, BackupFunctionKind, BackupFunctionReference, BackupFunctionSource,
 };
 #[cfg(any(windows, all(unix, not(target_os = "emscripten"))))]
-pub use import::{BackupRecordImportMapping, MappedRecordImageImportReader, RecordImageImportUnit};
+pub use import::{
+    BackupRecordImageWriter, BackupRecordImportMapping, MappedRecordImageImportReader,
+    RecordImageImportProgress, RecordImageImportUnit,
+};
 pub use inventory::{InventoryEntry, InventoryReader, InventorySummary, InventoryWriter};
 pub use mapping::{BackupRecordMapping, MappedRecordBackupImage};
 pub use memory::{

@@ -44,8 +44,9 @@ pub(super) fn select<'a>(
 
 pub(in crate::optimizer::scalar) fn retain_large_literal(
     expression: OwnedScalarExpr,
-    config: &OptimizerConfig<'_>,
+    production: super::ScalarProduction<'_, '_>,
 ) -> Result<OwnedScalarExpr, SQLError> {
+    let config = production.config;
     let Some(storage) = config.constant_storage.as_deref() else {
         return Ok(expression);
     };
@@ -99,7 +100,20 @@ pub(in crate::optimizer::scalar) fn retain_large_literal(
         _ => unreachable!("selected literal"),
     };
     // An existing typed leaf owns its allocating fields together. Copy the surviving value through its producer, retaining the original leaf until the store publishes the new owner.
-    let value = control.copy_value(value)?;
+    let value = if production.storage.budget().is_none() {
+        let ordinary = expression
+            .finish(&production.storage)?
+            .into_uncontrolled()
+            .expect("caller-owned literal");
+        let (ScalarExpr::Literal(value) | ScalarExpr::TypedLiteral { value, .. }) = ordinary else {
+            unreachable!("selected literal")
+        };
+        control.retain_external_value(value)?
+    } else if matches!(&*expression, ScalarExpr::Literal(_)) {
+        expression.into_literal_value(control)?
+    } else {
+        control.copy_value(value)?
+    };
     let retained = storage.retain_produced(value, control)?;
     let output = OwnedScalarExpr::retained_literal(
         RetainedScalarLiteral::with_control(
@@ -111,6 +125,5 @@ pub(in crate::optimizer::scalar) fn retain_large_literal(
         )?,
         control,
     )?;
-    drop(expression);
-    Ok(output)
+    production.adopt(output)
 }

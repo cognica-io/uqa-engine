@@ -73,6 +73,7 @@ impl SourceColumns {
             unqualified_relation: false,
         }
     }
+    #[cfg(test)]
     pub(super) fn owners(&self) -> &ColumnOwners {
         &self.owners
     }
@@ -83,15 +84,14 @@ impl SourceColumns {
             _ => None,
         }
     }
-    pub(super) fn reads_column_of(&self, column: &str, qualifier: &str) -> bool {
+    pub(super) fn readable_owner(&self, column: &str) -> Option<&str> {
         match self.owners.get(column) {
-            Some(owner) => owner.as_ref().map(|owner| owner.as_str()) == Some(qualifier),
-            None => {
-                self.only_relation() == Some(qualifier)
-                    && !self.unqualified_relation
-                    && self.opaque.contains(qualifier)
+            Some(owner) => owner.as_ref().map(|owner| owner.as_str()),
+            None => self.only_relation().filter(|name| {
+                !self.unqualified_relation
+                    && self.opaque.contains(name)
                     && !self.qualifiers.contains(column)
-            }
+            }),
         }
     }
     fn collect(

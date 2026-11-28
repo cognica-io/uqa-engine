@@ -24,6 +24,12 @@ On macOS ARM64 with Rust 1.95.0, the shared Korean and Japanese Viterbi lattice 
 
 Lowercase and ASCII folding each processed an 8,192-byte owned scalar ASCII token at a fully reserved memory limit with zero allocations. A prepared literal mapping searched 32 KiB of unmatched text for 512 independent compound keys in one scan with zero allocations. Separate differential cases compare the transformed text and every original UTF-8 and covering UTF-16 span. [Token filter regression](../../crates/uqa-analysis/src/token/allocation/tests/common_filters/resources.rs) · [Mapping regressions](../../crates/uqa-analysis/src/char_filter/literals/tests.rs)
 
+## Vector search work and memory (2026-11-27 UTC)
+
+With a 256-entry DiskANN frontier, 512 equal-priority nodes offered in reverse order and every admission repeated, `c8294ac94` made 772,005 priority comparisons. Binary insertion and hashed membership completed the same workload within 5,120 comparisons. Both the retained node order and the number of PQ estimates are checked, including rediscovery of an evicted node. [DiskANN frontier regression](../../crates/uqa-storage/src/diskann_index/search/tests.rs)
+
+On a ring of 128 nodes with 256 coordinates each, the HNSW query used to retain 512 upper-layer cache bytes after the base search. It now releases that cache before evaluating the base and decodes at most 128 candidate vectors. In IVF, selecting five out of 1,024 two-component documents required more than 4,096 workspace bytes on the same baseline. Trained and untrained search now both return the five canonical scores within 4,096 bytes. These are local macOS ARM64 comparison and memory counts. [HNSW cache regression](../../crates/uqa-storage/src/hnsw_index/tests/reads.rs) · [IVF selection regression](../../crates/uqa-storage/src/ivf_index/tests.rs)
+
 ## Posting and fusion allocations (2026-11-27 UTC)
 
 With 8,192 candidates scoring 0.001 on one signal and a second signal scoring 0.9 on the first document, using the explicit bound for a fully covering signal reduced scored documents from 8,192 to one. The result retained the exhaustive score bits. Partial coverage still admits the missing-score default when pruning. [Coverage regression](../../crates/uqa-scoring/src/fusion_wand.rs)

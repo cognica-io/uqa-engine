@@ -174,6 +174,7 @@ impl ObserveAllocations for QueryBlockPlan {
             windows,
             projections,
             privilege_columns,
+            privilege_subqueries,
             from,
             r#where,
             compute: _,
@@ -195,6 +196,7 @@ impl ObserveAllocations for QueryBlockPlan {
         observer.child(windows)?;
         observer.child(projections)?;
         observer.child(privilege_columns)?;
+        observer.child(privilege_subqueries)?;
         observer.child(from)?;
         observer.child(r#where)?;
         observer.child(group_by)?;

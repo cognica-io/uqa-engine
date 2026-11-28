@@ -352,3 +352,21 @@ fn split_leases_transfer_live_allocations_without_reacquiring_a_full_allowance()
     drop(unrelated);
     assert_eq!(budget.used(), 0);
 }
+
+#[test]
+fn restricting_live_workspace_charges_only_its_receiving_child() {
+    let root = MemoryBudget::new(64);
+    let workspace = root.child(64);
+    let cache = workspace.child(32);
+    let mut left = workspace.reserve(32).unwrap();
+    let mut right = workspace.reserve(32).unwrap();
+    left.restrict_to_child(&cache).unwrap();
+    assert_eq!((root.used(), workspace.used(), cache.used()), (64, 64, 32));
+    assert!(right.restrict_to_child(&cache).is_err());
+    assert!(right.budget().shares_allowance(&workspace));
+    assert_eq!((root.peak(), workspace.peak(), cache.peak()), (64, 64, 32));
+    drop(left);
+    right.restrict_to_child(&cache).unwrap();
+    drop(right);
+    assert_eq!((root.used(), workspace.used(), cache.used()), (0, 0, 0));
+}

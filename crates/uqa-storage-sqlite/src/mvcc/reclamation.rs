@@ -6,8 +6,8 @@
 
 //! Delete only revisions older than each retained predecessor; current materialization, heads and receipts stay intact.
 
-use super::{admission, codec, native, read, PhysicalResult};
-use rusqlite::{params, Connection};
+use super::{admission, codec, native, PhysicalResult};
+use rusqlite::{params, types::ValueRef, Connection};
 use uqa_storage::mvcc::{CommitSequence, DatabaseId, ReclamationHorizon, VersionError};
 use uqa_storage::read_control::StorageReadControl;
 
@@ -26,14 +26,25 @@ pub(super) fn reclaim(
     let horizon = ReclamationHorizon::new(current, oldest)?;
     let mut removed = 0_u64;
     {
-        let mut anchor = transaction.prepare(
+        let mut anchor = transaction.prepare_cached(
             "SELECT max(sequence) FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence <= ?2",
         )?;
-        let mut delete = transaction.prepare("DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence < ?2 ORDER BY sequence LIMIT 128)")?;
-        read::point_keys(&transaction, b"", None, usize::MAX, control, &mut |key| {
-            let (head, compacted) = codec::head_state(&transaction, key)?.ok_or(
-                VersionError::InvalidEncoding("reclamation head disappeared"),
-            )?;
+        let mut delete = transaction.prepare_cached("DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence < ?2 ORDER BY sequence LIMIT 128)")?;
+        // Stable heads yield only a cancellation point. A head keeps its primary key through this cursor. Marking an already visited tombstone and deleting its older versions are both idempotent if SQLite presents it again.
+        let mut heads = transaction.prepare_cached(
+            "SELECT h.sequence, h.compacted, CASE WHEN
+                EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata m WHERE m.key = h.key AND m.sequence < h.sequence)
+                OR (h.compacted = 0 AND EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata m WHERE m.key = h.key AND m.sequence = h.sequence AND m.payload_length IS NULL))
+                THEN h.key END FROM _uqa_mvcc_heads h ORDER BY h.key",
+        )?;
+        let mut rows = heads.query([])?;
+        while let Some(row) = rows.next()? {
+            control.check().map_err(VersionError::from)?;
+            let (head, compacted) = codec::decode_head(row)?;
+            if matches!(row.get_ref(2)?, ValueRef::Null) {
+                continue;
+            }
+            let key = codec::bytes(row, 2)?;
             let _bindings = crate::read_control::reserve_bindings(control, &[key])?;
             let cutoff = if compacted && head <= horizon.sequence() {
                 Some(head.as_u64())
@@ -51,7 +62,7 @@ pub(super) fn reclaim(
                 }
             };
             let Some(cutoff) = cutoff else {
-                return Ok(Some(true));
+                continue;
             };
             let cutoff = horizon.anchor(CommitSequence::from_u64(cutoff))?;
             loop {
@@ -71,8 +82,7 @@ pub(super) fn reclaim(
             if !compacted && cutoff == head {
                 compact_tombstone(&transaction, key, cutoff)?;
             }
-            Ok(Some(true))
-        })?;
+        }
     }
     super::runs::compact(&transaction, horizon.sequence(), control)?;
     super::backup_metadata::reclaim(&transaction, metadata_oldest, control)?;
@@ -86,12 +96,11 @@ fn compact_tombstone(
     sequence: CommitSequence,
 ) -> PhysicalResult<()> {
     let sequence = sequence.as_u64().to_be_bytes();
-    let changed = connection.execute("UPDATE _uqa_mvcc_heads SET compacted = 1 WHERE key = ?1 AND sequence = ?2 AND EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2 AND payload_length IS NULL)", params![key, sequence.as_slice()])?;
+    let changed = connection.prepare_cached("UPDATE _uqa_mvcc_heads SET compacted = 1 WHERE key = ?1 AND sequence = ?2 AND EXISTS(SELECT 1 FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2 AND payload_length IS NULL)")?.execute(params![key, sequence.as_slice()])?;
     if changed != 0 {
-        connection.execute(
+        connection.prepare_cached(
             "DELETE FROM _uqa_mvcc_versions WHERE version_id = (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key = ?1 AND sequence = ?2 AND payload_length IS NULL)",
-            params![key, sequence.as_slice()],
-        )?;
+        )?.execute(params![key, sequence.as_slice()])?;
     }
     Ok(())
 }

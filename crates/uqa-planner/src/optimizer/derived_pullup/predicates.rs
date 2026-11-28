@@ -4,174 +4,33 @@
 // Copyright (c) 2023-2026 Cognica, Inc.
 //
 
-//! Move eligible qualifications and their unshared scalar-query arenas together.
+//! Qualification movement preserves exclusive scalar-query ownership and the original rollback boundary.
 
-use std::collections::BTreeSet;
-use uqa_sql::{
-    binding::scoped_references::ScopedReferences,
-    plan::{QueryPlan, RelationalPlan, SourcePlan},
-    semantics::{
-        collect_subquery_ids, flatten_and_filter_parts, volatility::scalar_calls_are_volatile,
-    },
-    ScalarExpr,
+use super::{
+    Buffer, Context, MutableQueryPlan, OwnedScalarExpr, ProductionControl, RelationalPlan,
+    SQLError, ScalarExpr, SourcePlan,
 };
+use uqa_core::memory::ProductionMap;
+use uqa_sql::plan::{ComputePlan, QueryPlan};
 
-pub(super) fn push(query: &mut QueryPlan, context: &super::Context<'_>) {
-    let Some(Candidate {
-        block,
-        input,
-        qualifier,
-        mut producer,
-    }) = candidate(query)
-    else {
-        return;
-    };
-    let predicate = block.r#where.as_ref().expect("selected qualification");
-    let mut moved = Vec::new();
-    let mut retained = Vec::new();
-    for part in flatten_and_filter_parts(predicate) {
-        let simplified = simple_exists(part, &block.subqueries, context);
-        let was_simplified = simplified.is_some();
-        let mut replacement = simplified.unwrap_or_else(|| part.clone());
-        let mut ids = BTreeSet::new();
-        collect_subquery_ids(&replacement, &mut ids);
-        let eligible = (was_simplified || !ids.is_empty())
-            && !scalar_calls_are_volatile(context.volatility, &replacement)
-            && ids
-                .iter()
-                .all(|id| block.subqueries.get(*id).is_some_and(independent));
-        replacement.visit_mut(&mut |node| {
-            if let Some(identity) = uqa_sql::type_resolution::relation_field_column(node, input) {
-                *node = super::identity_expression(&identity);
-            }
-        });
-        let rewritten = eligible
-            .then(|| {
-                crate::filter_pushdown::derived_output_predicate(
-                    context.routines,
-                    context.volatility,
-                    &producer,
-                    qualifier,
-                    &replacement,
-                    Some(input.columns()),
-                    true,
-                )
-            })
-            .flatten();
-        if let Some(rewritten) = rewritten {
-            moved.push(rewritten);
-        } else {
-            retained.push(part.clone());
-        }
-    }
-    let Some(mut moved) = crate::filter_pushdown::combine_filter_parts(moved) else {
-        return;
-    };
-    let mut changed = block.clone();
-    changed.r#where = crate::filter_pushdown::combine_filter_parts(retained);
-    if !uqa_sql::plan::subqueries::transfer_expression(
-        &mut moved,
-        &mut changed,
-        &mut producer.subqueries,
-    ) {
-        return;
-    }
-    producer.r#where = Some(match producer.r#where.take() {
-        Some(existing) => ScalarExpr::And(vec![existing, moved]),
-        None => moved,
-    });
-    let Some(SourcePlan::Subquery { body, .. }) = &mut changed.from else {
-        unreachable!("selected producer")
-    };
-    body.root = RelationalPlan::QueryBlock(producer);
-    query.root = RelationalPlan::QueryBlock(Box::new(changed));
-}
-
-/// A source-free, non-aggregating EXISTS observes whether its one possible row passes WHERE. NULL is false, so the qualification is not an ordinary nullable predicate. Negated EXISTS retains PostgreSQL's separate anti-join boundary.
-fn simple_exists(
-    expression: &ScalarExpr,
-    arena: &[QueryPlan],
-    context: &super::Context<'_>,
-) -> Option<ScalarExpr> {
-    use uqa_sql::ast::{BooleanTest, FunctionBinding, FunctionDispatch};
-    let ScalarExpr::Exists { subquery, negated } = expression else {
-        return None;
-    };
-    if *negated {
-        return None;
-    }
-    let query = arena.get(*subquery)?;
+pub(super) fn push(
+    query: MutableQueryPlan,
+    context: &Context<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<MutableQueryPlan, SQLError> {
+    control.check()?;
     let RelationalPlan::QueryBlock(block) = &query.root else {
-        return None;
+        return Ok(query);
     };
-    if !query.ctes.is_empty()
-        || block.from.is_some()
-        || !matches!(block.compute, uqa_sql::plan::ComputePlan::Project)
-        || !block.group_by.is_empty()
-        || !block.grouping_sets.is_empty()
-        || block.having.is_some()
-        || !block.windows.is_empty()
-        || block.limit.is_some()
-        || block.offset.is_some()
-        || !block.locking.is_empty()
-        || !block.privilege_columns.is_empty()
-        || !block.subqueries.is_empty()
-        || block.projections.iter().any(|projection| {
-            uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically(
-                context.routines,
-                &projection.expr,
-            )
-        })
-    {
-        return None;
-    }
-    let predicate = block.r#where.as_ref()?;
-    let binding = FunctionBinding::dispatched(FunctionDispatch::BooleanTest(BooleanTest::IsTrue));
-    Some(ScalarExpr::Func {
-        name: binding.name.clone(),
-        binding: Some(binding),
-        args: vec![predicate.clone()],
-        distinct: false,
-        order_by: Vec::new(),
-        order_syntax: uqa_sql::ast::FunctionOrderSyntax::default(),
-        filter: None,
-    })
-}
-
-fn independent(query: &QueryPlan) -> bool {
-    let mut external = false;
-    let mut visit = |node: &ScalarExpr| {
-        external |= matches!(
-            node,
-            ScalarExpr::Column(_)
-                | ScalarExpr::QualifiedColumn { .. }
-                | ScalarExpr::QualifiedStar(_)
-                | ScalarExpr::InternalColumn(_)
-        );
+    let Some(predicate) = &block.r#where else {
+        return Ok(query);
     };
-    let mut references = ScopedReferences::new(&mut visit);
-    references.query(query);
-    references.is_complete() && !external
-}
-
-struct Candidate<'a> {
-    block: &'a uqa_sql::plan::QueryBlockPlan,
-    input: &'a uqa_sql::RowSchema,
-    qualifier: &'a str,
-    producer: Box<uqa_sql::plan::QueryBlockPlan>,
-}
-
-fn candidate(query: &QueryPlan) -> Option<Candidate<'_>> {
-    let RelationalPlan::QueryBlock(block) = &query.root else {
-        return None;
-    };
-    let predicate = block.r#where.as_ref()?;
     if !uqa_sql::semantics::expr_contains_subquery(predicate)
         || block.subqueries.is_empty()
         || !block.locking.is_empty()
-        || !block.privilege_columns.is_empty()
+        || block.has_projection_privileges()
     {
-        return None;
+        return Ok(query);
     }
     let Some(SourcePlan::Subquery {
         body,
@@ -181,42 +40,223 @@ fn candidate(query: &QueryPlan) -> Option<Candidate<'_>> {
         ..
     }) = &block.from
     else {
-        return None;
+        return Ok(query);
     };
     if !body.ctes.is_empty()
         || body.relations_bound != query.relations_bound
         || body.relation_privilege_subject.is_some()
     {
-        return None;
+        return Ok(query);
     }
-    let (Some(input), Some(producer_input)) = (&query.analyzed_source, &body.analyzed_source)
-    else {
-        return None;
+    let (Some(input), Some(_)) = (&query.analyzed_source, &body.analyzed_source) else {
+        return Ok(query);
     };
     if input.schema.columns_are_open(None) {
-        return None;
+        return Ok(query);
     }
     let RelationalPlan::QueryBlock(producer) = &body.root else {
-        return None;
+        return Ok(query);
     };
-    if !producer.locking.is_empty() || !producer.privilege_columns.is_empty() {
-        return None;
+    if !crate::filter_pushdown::owned::accepts_output_predicates(producer)
+        || !producer.locking.is_empty()
+        || producer.has_projection_privileges()
+    {
+        return Ok(query);
     }
-    let Ok(projections) = uqa_sql::semantics::expand_bound_projection_stars(
-        &producer.projections,
-        &producer_input.schema,
-    ) else {
-        return None;
-    };
-    if projections.len() != input.schema.len() {
-        return None;
-    }
-    let mut producer = producer.clone();
-    producer.projections = projections;
-    Some(Candidate {
-        block,
-        input: &input.schema,
-        qualifier,
+    let producer = body.copy_for_rewrite(control)?;
+    let (producer, expanded) = super::super::derived_projection::owned::expand_stars(
         producer,
-    })
+        Some(&input.schema),
+        control,
+    )?;
+    if !expanded || super::projections(&producer).len() != input.schema.len() {
+        return Ok(query);
+    }
+    let changed = query.copy_for_rewrite(control)?;
+    let (changed, predicate) = changed.take_where(control)?;
+    let mut parts = Buffer::new(*control);
+    super::flatten(
+        predicate.expect("selected qualification"),
+        &mut parts,
+        control,
+    )?;
+    let mut moved = Buffer::new(*control);
+    let mut retained = Buffer::new(*control);
+    for part in parts {
+        let (replacement, eligible) = pushable_part(&part, &block.subqueries, context, control)?;
+        let replacement = replacement.replace_nodes(control, &mut |node| {
+            uqa_sql::type_resolution::relation_field_column_ref(node, &input.schema)
+                .map(|identity| super::identity_expression(identity, control))
+                .transpose()
+        })?;
+        let rewritten = if eligible {
+            let RelationalPlan::QueryBlock(producer) = &producer.root else {
+                unreachable!()
+            };
+            crate::filter_pushdown::owned::derived_output_predicate(
+                crate::filter_pushdown::owned::PredicateServices {
+                    routines: context.routines,
+                    volatility: context.volatility,
+                },
+                producer,
+                qualifier,
+                &replacement,
+                Some(input.schema.columns()),
+                true,
+                control,
+            )?
+        } else {
+            None
+        };
+        if let Some(rewritten) = rewritten {
+            moved.push(rewritten)?;
+        } else {
+            retained.push(part)?;
+        }
+    }
+    transfer(query, changed, producer, moved, retained, control)
+}
+
+fn transfer(
+    query: MutableQueryPlan,
+    changed: MutableQueryPlan,
+    producer: MutableQueryPlan,
+    moved: Buffer<OwnedScalarExpr>,
+    retained: Buffer<OwnedScalarExpr>,
+    control: &ProductionControl<'_>,
+) -> Result<MutableQueryPlan, SQLError> {
+    let Some(moved) = super::combine(moved, control)? else {
+        return Ok(query);
+    };
+    let changed = changed.replace_where(super::combine(retained, control)?, control)?;
+    let (changed, producer, moved, transferred) =
+        changed.transfer_expression_to(producer, moved, control)?;
+    if !transferred {
+        return Ok(query);
+    }
+    let producer = super::append_where(producer, moved, control)?;
+    let changed = changed.map_source(control, |source| {
+        source.map_query(control, |_| Ok(producer))
+    })?;
+    query.commit_rewrite(changed, control)
+}
+
+fn pushable_part(
+    part: &OwnedScalarExpr,
+    subqueries: &[QueryPlan],
+    context: &Context<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<(OwnedScalarExpr, bool), SQLError> {
+    let simplified = simple_exists(part, subqueries, context, control)?;
+    let was_simplified = simplified.is_some();
+    let replacement = match simplified {
+        Some(value) => value,
+        None => part.copy_for_rewrite(control)?,
+    };
+    let mut ids = ProductionMap::new(*control);
+    replacement.try_visit(&mut |node| {
+        control.check()?;
+        match node {
+            ScalarExpr::ScalarSubquery(id)
+            | ScalarExpr::Exists { subquery: id, .. }
+            | ScalarExpr::InSubquery { subquery: id, .. } => {
+                ids.insert_copy(*id, ())?;
+            }
+            _ => {}
+        }
+        Ok::<_, SQLError>(true)
+    })?;
+    let mut eligible = (was_simplified || !ids.is_empty())
+        && !uqa_sql::semantics::volatility::scalar_calls_are_volatile_with_control(
+            context.volatility,
+            &replacement,
+            control,
+        )?;
+    if eligible {
+        for (id, ()) in &ids {
+            let Some(query) = subqueries.get(*id) else {
+                eligible = false;
+                break;
+            };
+            if !independent(query, control)? {
+                eligible = false;
+                break;
+            }
+        }
+    }
+    Ok((replacement, eligible))
+}
+
+fn simple_exists(
+    expression: &ScalarExpr,
+    arena: &[QueryPlan],
+    context: &Context<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Option<OwnedScalarExpr>, SQLError> {
+    use uqa_sql::ast::{BooleanTest, FunctionBinding, FunctionDispatch};
+    let ScalarExpr::Exists {
+        subquery,
+        negated: false,
+    } = expression
+    else {
+        return Ok(None);
+    };
+    let Some(query) = arena.get(*subquery) else {
+        return Ok(None);
+    };
+    let RelationalPlan::QueryBlock(block) = &query.root else {
+        return Ok(None);
+    };
+    if !query.ctes.is_empty()
+        || block.from.is_some()
+        || !matches!(block.compute, ComputePlan::Project)
+        || !block.group_by.is_empty()
+        || !block.grouping_sets.is_empty()
+        || block.having.is_some()
+        || !block.windows.is_empty()
+        || block.limit.is_some()
+        || block.offset.is_some()
+        || !block.locking.is_empty()
+        || block.has_projection_privileges()
+        || !block.subqueries.is_empty()
+    {
+        return Ok(None);
+    }
+    for projection in &block.projections {
+        if uqa_sql::semantics::sets::static_setness::expression_may_return_set_statically_with_control(context.routines, &projection.expr, control)? {
+            return Ok(None);
+        }
+    }
+    let Some(predicate) = &block.r#where else {
+        return Ok(None);
+    };
+    let binding = FunctionBinding::dispatched_with_control(
+        FunctionDispatch::BooleanTest(BooleanTest::IsTrue),
+        control,
+    )?;
+    Ok(Some(OwnedScalarExpr::call(
+        control.copy_text(&binding.name)?,
+        Some(binding),
+        std::iter::once(predicate.copy_for_rewrite(control)?),
+        control,
+    )?))
+}
+
+fn independent(query: &QueryPlan, control: &ProductionControl<'_>) -> Result<bool, SQLError> {
+    let mut external = false;
+    let mut visit = |node: &ScalarExpr| {
+        control.check()?;
+        external |= matches!(
+            node,
+            ScalarExpr::Column(_)
+                | ScalarExpr::QualifiedColumn { .. }
+                | ScalarExpr::QualifiedStar(_)
+                | ScalarExpr::InternalColumn(_)
+        );
+        Ok(())
+    };
+    let mut references =
+        uqa_sql::binding::scoped_references::ControlledScopedReferences::new(&mut visit, *control);
+    references.query(query)?;
+    Ok(references.is_complete() && !external)
 }

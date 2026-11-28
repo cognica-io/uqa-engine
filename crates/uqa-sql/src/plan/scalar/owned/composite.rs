@@ -50,24 +50,14 @@ impl OwnedScalarExpr {
 
     /// Replace only the selected written type while the scalar constructor preserves its children and every other field.
     pub(crate) fn replace_type_name(
-        mut self,
+        self,
         name: Produced<String>,
         control: &ProductionControl<'_>,
     ) -> Result<Self> {
-        self.assert_owner(control);
-        control.check()?;
-        let old = self
-            .expression
-            .written_type_name_mut()
-            .expect("selected type name requires a typed constructor");
-        let bytes = old.capacity();
-        let (name, lease) = name.into_parts();
-        *old = name;
-        if let Some(owner) = &mut self.memory {
-            drop(owner.direct.split(bytes));
-            owner.direct.absorb(lease.expect("controlled written type"));
-        }
-        control.check()?;
-        Ok(self)
+        self.replace_text_field(name, control, |expression| {
+            expression
+                .written_type_name_mut()
+                .expect("selected type name requires a typed constructor")
+        })
     }
 }

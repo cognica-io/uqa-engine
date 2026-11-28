@@ -7,7 +7,6 @@
 //! Prepare named relational inputs once, before any statement input produces rows.
 
 use super::{ColumnPrune, CteScope, RowSchema, SourceContext};
-use uqa_core::memory::ProductionVec;
 use uqa_sql::binding::production::{BindingMap, BindingNameSet};
 use uqa_sql::{
     binding::SourceScope,
@@ -199,13 +198,10 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     }
     drop(scheduled);
     declare_ctes(context, query, params, &mut lookup, &folded, outer)?;
-    let mut names = ProductionVec::new(control);
-    for cte in &query.ctes {
-        names.push_produced(control.copy_text(&cte.name)?)?;
-    }
-    let names = names.finish()?;
-    let mut scope =
-        lookup.enter_visible_ctes_with_control(names.iter().map(String::as_str), &control)?;
+    let mut scope = lookup.enter_visible_ctes_with_control(
+        query.ctes.iter().map(|cte| cte.name.as_str()),
+        &control,
+    )?;
     for cte in &mut query.ctes {
         // Folded inputs are prepared at each selected reference; unused inputs never execute.
         if !materialized.contains(&cte.name) {
@@ -254,9 +250,16 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                 outer,
                 &control,
             )?;
+            let privilege_only = block.privilege_only_subquery_slots(control)?;
             prepare_subqueries(
                 context,
-                &mut block.subqueries,
+                block
+                    .subqueries
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(slot, query)| {
+                        privilege_only.get(&slot).is_none().then_some(query)
+                    }),
                 params,
                 &scope,
                 Some(&expression_schema),
@@ -280,9 +283,9 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-fn prepare_subqueries<S: Clone + Send + Sync + 'static>(
+fn prepare_subqueries<'p, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
-    queries: &mut [QueryPlan],
+    queries: impl IntoIterator<Item = &'p mut QueryPlan>,
     params: &[SQLParam],
     scope: &CteScope<S>,
     outer: Option<&RowSchema>,

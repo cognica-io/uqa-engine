@@ -149,7 +149,7 @@ impl Run {
     }
 
     fn insert(&self, connection: &Connection, first: &[u8], last: &[u8]) -> PhysicalResult<()> {
-        connection.execute("INSERT INTO _uqa_mvcc_runs (key_length, first_key, last_key, sequence, kind, value) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![i64::try_from(first.len()).expect("bounded key length"), first, last, self.bounds.sequence.as_u64().to_be_bytes().as_slice(), self.bounds.kind, self.bounds.value_length.map(|length| &self.template[..length])])?;
+        connection.prepare_cached("INSERT INTO _uqa_mvcc_runs (key_length, first_key, last_key, sequence, kind, value) VALUES (?1, ?2, ?3, ?4, ?5, ?6)")?.execute(params![i64::try_from(first.len()).expect("bounded key length"), first, last, self.bounds.sequence.as_u64().to_be_bytes().as_slice(), self.bounds.kind, self.bounds.value_length.map(|length| &self.template[..length])])?;
         Ok(())
     }
 }
@@ -206,20 +206,10 @@ pub(super) fn extract(
     )?;
     let mut output = [0; MAX_VALUE];
     let value = run.value(key, &mut output);
-    connection.execute(
-        "INSERT INTO _uqa_mvcc_versions (key, sequence, value) VALUES (?1, ?2, ?3)",
-        params![
-            key,
-            run.bounds.sequence.as_u64().to_be_bytes().as_slice(),
-            value
-        ],
-    )?;
-    super::version_metadata::retain_image_digest(
-        connection,
+    super::version_metadata::VersionInsert::new(connection, control)?.insert(
         key,
         run.bounds.sequence,
         value,
-        control,
     )?;
     connection.execute(
         "DELETE FROM _uqa_mvcc_runs WHERE key_length = ?1 AND first_key = ?2",

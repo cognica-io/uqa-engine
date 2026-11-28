@@ -21,6 +21,27 @@ impl Hash for Collision {
 
 proptest! {
     #[test]
+    fn colliding_map_removal_and_reinsertion_preserve_probe_chains(operations in prop::collection::vec((0_u8..32, any::<Option<u8>>()), 0..256)) {
+        let budget = MemoryBudget::new(1 << 20);
+        let mut actual = BudgetedHashMap::new(&budget);
+        let mut expected = std::collections::BTreeMap::new();
+        for (key, value) in operations {
+            let collision = Collision(u64::from(key));
+            if let Some(value) = value {
+                prop_assert_eq!(actual.insert(collision, value).unwrap(), expected.insert(key, value));
+            } else {
+                prop_assert_eq!(actual.remove(&collision), expected.remove(&key));
+            }
+            prop_assert_eq!(actual.len(), expected.len());
+            for key in 0_u8..32 {
+                prop_assert_eq!(actual.get(&Collision(u64::from(key))), expected.get(&key));
+            }
+        }
+        drop(actual);
+        prop_assert_eq!(budget.used(), 0);
+    }
+
+    #[test]
     fn colliding_membership_matches_an_independent_ordered_set(values in prop::collection::vec(any::<u64>(), 0..160)) {
         let budget = MemoryBudget::new(1 << 20);
         let mut actual = BudgetedHashSet::new(&budget);
@@ -40,7 +61,7 @@ proptest! {
 
 #[test]
 fn failed_growth_preserves_members_and_duplicate_insertion_needs_no_headroom() {
-    let bucket_bytes = size_of::<Option<Entry<u64>>>();
+    let bucket_bytes = size_of::<Option<Entry<u64, ()>>>();
     let budget = MemoryBudget::new(5 * bucket_bytes);
     let mut set = BudgetedHashSet::new(&budget);
     set.insert(u64::MAX).unwrap();
@@ -69,7 +90,7 @@ fn complete_bucket_layouts_stay_charged_while_the_replacement_coexists() {
     set.insert(1_u64).unwrap();
     let old = budget.used();
     set.insert(2).unwrap();
-    let current = set.buckets.capacity() * size_of::<Option<Entry<u64>>>();
+    let current = set.0.buckets.capacity() * size_of::<Option<Entry<u64, ()>>>();
     assert_eq!(budget.used(), current);
     assert_eq!(budget.peak(), old + current);
     drop(set);

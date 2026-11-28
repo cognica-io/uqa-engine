@@ -55,7 +55,7 @@ fn bounded_join(using: bool, cancelled: Option<bool>) {
             .chain((1..1024).map(|index| format!("column_{index:049}")))
             .collect()
     };
-    let (mut source, analysis) = join_fixture(names, using);
+    let (source, analysis) = join_fixture(names, using);
     let before = serde_json::to_value(&source).unwrap();
     let parent = MemoryBudget::new(4096);
     let sibling = parent.reserve(512).unwrap();
@@ -73,12 +73,22 @@ fn bounded_join(using: bool, cancelled: Option<bool>) {
     let context = Context {
         config: &config,
         aggregates: &|_: &str| false,
+        storage: ProductionControl::uncontrolled(),
         ctes: None,
     };
     let demanded = Demand::new(control);
     let mut result = None;
     let allocation = allocation_counter::measure(|| {
-        result = Some(context.join(&mut source, &analysis, &demanded, &[]));
+        result = Some(
+            context
+                .join_demand(
+                    &source,
+                    analysis.children.as_deref().unwrap(),
+                    &demanded,
+                    &[],
+                )
+                .map(drop),
+        );
     });
     assert!(allocation.bytes_total < 8192, "{allocation:?}");
     assert_eq!(
@@ -92,6 +102,26 @@ fn bounded_join(using: bool, cancelled: Option<bool>) {
     assert_eq!(memory.used(), 0);
     assert_eq!(parent.used(), sibling.bytes());
     assert_eq!(serde_json::to_value(&source).unwrap(), before);
+    let mut result = None;
+    let allocation = allocation_counter::measure(|| {
+        result = Some(context.source(
+            uqa_sql::plan::MutableSourcePlan::uncontrolled(source),
+            &analysis,
+            &demanded,
+            &[],
+        ));
+    });
+    assert!(allocation.bytes_total < 8192, "{allocation:?}");
+    let error = result.unwrap().unwrap_err();
+    assert_eq!(
+        error.sqlstate(),
+        Some(if cancelled.is_some() {
+            "57014"
+        } else {
+            "53200"
+        })
+    );
+    assert_eq!(parent.used(), sibling.bytes());
 }
 
 #[test]

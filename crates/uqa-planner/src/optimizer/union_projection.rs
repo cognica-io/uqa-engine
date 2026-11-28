@@ -6,8 +6,9 @@
 
 //! Positional demand through UNION ALL, retaining PostgreSQL append-member simplification boundaries.
 
-use super::OutputPruningContext;
+use super::{derived_projection::ProjectionTarget, OutputPruningContext};
 use crate::{ComputePlan, QueryPlan, RelationalPlan, SourcePlan};
+use uqa_sql::plan::QueryChildSlot;
 use uqa_sql::{
     ast::{FunctionVolatility, SetOpKind},
     routines::RoutineResolution,
@@ -15,18 +16,20 @@ use uqa_sql::{
     ColumnType, RowSchema, SQLError, ScalarExpr,
 };
 
-pub(super) fn prune(
-    query: &mut QueryPlan,
+pub(super) fn prune<Q: ProjectionTarget>(
+    query: Q,
     required: &dyn Fn(usize) -> bool,
     context: OutputPruningContext<'_>,
-) -> Result<(), SQLError> {
-    let Some(output) = query.analyzed_output.clone() else {
-        return Ok(());
-    };
-    if !simple_union(query, output.column_types()) {
-        return Ok(());
+) -> Result<Q, SQLError> {
+    if query
+        .analyzed_output
+        .as_ref()
+        .is_some_and(|output| simple_union(&query, output.column_types()))
+    {
+        members(query, required, context)
+    } else {
+        Ok(query)
     }
-    prune_members(query, required, context)
 }
 
 fn simple_union(query: &QueryPlan, types: &[Option<ColumnType>]) -> bool {
@@ -66,32 +69,30 @@ fn same_types(schema: &RowSchema, types: &[Option<ColumnType>]) -> bool {
             })
 }
 
-fn prune_members(
-    query: &mut QueryPlan,
+pub(super) fn members<Q: ProjectionTarget>(
+    query: Q,
     required: &dyn Fn(usize) -> bool,
     context: OutputPruningContext<'_>,
-) -> Result<(), SQLError> {
+) -> Result<Q, SQLError> {
     let pulled_up = observation::pulled_up_member(
-        query,
+        &query,
         context.routines,
         context.volatility,
         &context.production,
     )?;
-    match &mut query.root {
-        RelationalPlan::SetOp { left, right, .. } => {
-            prune_members(left, required, context)?;
-            prune_members(right, required, context)?;
+    match &query.root {
+        RelationalPlan::SetOp { .. } => {
+            let query = query.prune_union_child(QueryChildSlot::Left, required, context)?;
+            query.prune_union_child(QueryChildSlot::Right, required, context)
         }
         RelationalPlan::QueryBlock(_) if pulled_up == Some(false) => {
-            super::derived_projection::prune_positions(query, required, None, context)?;
+            super::derived_projection::prune_target_positions(query, required, None, context)
         }
-        _ => {}
+        _ => Ok(query),
     }
-    Ok(())
 }
 
 mod observation;
-pub(super) mod owned;
 
 #[cfg(test)]
 mod tests {
@@ -210,7 +211,7 @@ mod tests {
             let schema = RowSchema::with_types(vec!["z".into()], vec![Some(ColumnType::Integer)]);
             query.visit_queries_mut(&mut |query| query.analyzed_output = Some(schema.clone()));
             prune(
-                &mut query,
+                &mut *query,
                 &|_| false,
                 OutputPruningContext::new(&NoAggregates),
             )

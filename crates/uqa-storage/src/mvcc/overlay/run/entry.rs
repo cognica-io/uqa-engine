@@ -7,11 +7,14 @@
 //! The encoding of one spilled change: its key and metadata in the entry file, and the place of its value in the value file.
 
 use std::io::Read;
+use std::sync::Arc;
 use uqa_core::memory::{BudgetedVec, MemoryBudget};
 
 use crate::mvcc::commit::RecordWriteKind;
 use crate::mvcc::key::RecordKey;
-use crate::mvcc::{CommitSequence, PrivateRecordRevision, VersionError, VersionResult};
+use crate::mvcc::{
+    CommitSequence, PreparedRecordWrite, PrivateRecordRevision, VersionError, VersionResult,
+};
 use crate::read_control::StorageReadControl;
 
 const EXPECTED: u8 = 1;
@@ -26,12 +29,24 @@ pub(in crate::mvcc) struct ValueLocation {
 }
 
 /// One change read back from a run, with its key owned and its value, if it has one, still in the value file.
+#[derive(Clone)]
 pub(in crate::mvcc) struct RunEntry {
     pub(in crate::mvcc) key: RecordKey,
     pub(in crate::mvcc) expected: Option<CommitSequence>,
     pub(in crate::mvcc) kind: RecordWriteKind,
     pub(in crate::mvcc) identity: PrivateRecordRevision,
     pub(in crate::mvcc) value: Option<ValueLocation>,
+}
+
+impl RunEntry {
+    pub(in crate::mvcc) fn into_write(
+        self,
+        value: Option<Arc<BudgetedVec<u8>>>,
+    ) -> PreparedRecordWrite {
+        PreparedRecordWrite::from_shared(self.key, self.expected, value)
+            .with_kind(self.kind)
+            .with_private_revision(self.identity)
+    }
 }
 
 /// An encoded entry, borrowing its key from the block that holds it.

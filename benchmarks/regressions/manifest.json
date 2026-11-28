@@ -582,6 +582,32 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "indexed_outer_replacements_preserve_duplicate_order_and_reuse_borrowed_columns",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Indexed outer column substitution",
+      "workload": "Build one replacement index for an outer row and probe it repeatedly for two child queries and a whole-row reference.",
+      "invariant": "Ordinary and retained lookups allocate zero times, use the last duplicate, preserve output names and refuse a whole-row replacement.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "duplicate_outer_replacements_use_memory_for_one_identity",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/binding/scoped_references/tests.rs",
+      "capability": "Scoped outer-column substitution",
+      "workload": "Replace one qualified column 100,001 times under a 64 KiB allowance.",
+      "invariant": "The index retains the final replacement and releases its allowance on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "persisted_call_sites_preserve_runtime_fallback_and_require_concrete_function_identities",
       "cases": 1,
       "source": "crates/uqa-sql/src/catalog/stored_ast/sites/tests.rs",
@@ -5365,6 +5391,110 @@
       ]
     },
     {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "snapshot_metadata_uses_one_range_and_preserves_header_error_order",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/metadata/window.rs",
+      "capability": "Physical redb snapshot header reads",
+      "workload": "Admit a fixed metadata table through the real redb range API, then remove the format and identity and invalidate the receipt limit.",
+      "invariant": "Each admission uses one ordered range and zero point reads. Combined damage reports the format, identity and receipt limit errors in order.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "mixed_private_and_committed_points_keep_one_lazy_read_window",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/selection.rs",
+      "capability": "Ordered mixed MVCC point selection",
+      "workload": "Read six ordered keys with duplicates, a spilled private overlay, absent committed keys and two visitor stops under a 32 KiB read allowance.",
+      "invariant": "Private-only requests open no committed cursor. Three physical requests share one cursor, retain caller order and release all charged memory.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "bulk_postings_read_source_metadata_in_batches_and_share_the_field_revision",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/inverted_index/tests/counts.rs",
+      "capability": "Batched SQLite posting source metadata",
+      "workload": "Look up one term across 130 documents in three posting clusters while counting physical source and statistics reads.",
+      "invariant": "Three source reads and one field revision read serve all 130 documents.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "reclaiming_two_histories_uses_bounded_statements_among_single_version_heads",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/reclamation.rs",
+      "capability": "SQLite MVCC reclamation work",
+      "workload": "Keep one pinned snapshot while reclaiming two old revisions in databases with 32 and 256 live heads.",
+      "invariant": "Both sizes use at most 64 SELECTs, preserve the pinned values and reclaim exactly the two obsolete revisions.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-redb",
+      "kind": "lib",
+      "test": "interrupted_redb_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-redb/src/mvcc/tests/backup_import.rs",
+      "capability": "Bounded private redb import commits",
+      "workload": "Write 129 records to a private redb import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "interrupted_sqlite_image_commits_only_complete_private_chunks",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/restore/tests/backup_import.rs",
+      "capability": "Bounded private SQLite import commits",
+      "workload": "Write 129 records to a private SQLite import, interrupt the writer and read the closed target directly.",
+      "invariant": "Exactly 128 records are durable, and the unfinished format prevents ordinary opens.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "wide_missing_point_projections_reuse_one_reference_buffer",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/document_store/native/decoded/tests.rs",
+      "capability": "SQLite document point projection allocation",
+      "workload": "Project 32 fields for 128 absent documents through both reentrant and borrowed point readers.",
+      "invariant": "Each scan visits all requested rows with NULL fields and uses at most two heap allocations for the projection.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "staged_versions_publish_their_fingerprint_in_one_metadata_insert",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/version_metadata/tests.rs",
+      "capability": "SQLite version metadata write amplification",
+      "workload": "Observe metadata inserts and updates while staging a value, an empty value and a tombstone.",
+      "invariant": "Each version produces one insert with its final digest or NULL for the tombstone, and no subsequent update.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
       "package": "uqa-storage",
       "kind": "lib",
       "test": "key_value_backup_import_accepts_literal_header_allocators_and_empty_records_for_both_mappings",
@@ -6790,6 +6920,305 @@
       "capability": "Retained aggregate input metadata",
       "workload": "A metadata-wrapped integer column and a typed BIGINT literal widen addition beyond the INTEGER maximum.",
       "invariant": "Resolve positional columns through metadata while retaining the original selected operand types for width inference.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "parallel_join_predicates_cost_both_orientations_in_one_edge_scan",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/join_enumerator/tests.rs",
+      "capability": "Enumeration of parallel join predicates",
+      "workload": "Cost five predicates on a two-relation join with and without an indexed inner column.",
+      "invariant": "Five edge visits determine both orientations, preserving selected keys and exact cardinality.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "disjunction_pushdown_checks_calls_once_per_walk_and_copies_only_surviving_qualifiers",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/filter_pushdown/tests/production.rs",
+      "capability": "Disjunctive filter placement",
+      "workload": "Place two disjuncts containing four calls and a 4 MiB literal from a source present in just one disjunct.",
+      "invariant": "A 64 KiB allowance admits the two shared qualifiers in order and the catalog observes eight calls across the two walks.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "wide_absorption_indexes_each_member_once_and_moves_the_surviving_payload",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
+      "capability": "Boolean membership absorption",
+      "workload": "Simplify 128 filters paired with opposite Boolean operators alongside a scored term with a 1 MiB buffer.",
+      "invariant": "Exactly 512 membership nodes are classified, 129 operands survive and the scored term retains its original allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "distinct_operand_shapes_do_not_index_unrelated_subtrees",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/algebra.rs",
+      "capability": "Boolean membership reduction",
+      "workload": "Combine a composition of 4,096 filters with a differently shaped filter under intersection and union.",
+      "invariant": "Both operands survive in order and the reducer visits zero nodes to construct membership keys.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "graph_edge_filter_preserves_buffers_and_shares_the_selected_predicate",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
+      "capability": "Graph edge predicate pushdown",
+      "workload": "Select an edge predicate with intersecting source and target aliases, duplicate edges and different labels.",
+      "invariant": "The original edge and graph buffers survive. Only both copies of the selected edge share the property predicate.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "fused_patterns_keep_declaration_and_constraint_order_and_move_edge_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/query_optimizer/graph_rewrites/tests.rs",
+      "capability": "Graph pattern fusion",
+      "workload": "Fuse repeated variable declarations on both sides with an independently allocated long edge label.",
+      "invariant": "The last left declaration keeps its first position, right constraints append in order, and the edge retains its original label buffer.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "ineligible_derived_source_keeps_its_existing_query_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived source eligibility",
+      "workload": "Examine a DISTINCT derived source containing a 4 MiB literal while a sibling holds all remaining memory.",
+      "invariant": "The original source and all reservations survive without any heap allocation for speculative rewriting.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "source_free_and_open_producers_keep_the_parent_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived source eligibility",
+      "workload": "Plan a source-free projection and a source with an open input schema while a sibling holds all remaining memory.",
+      "invariant": "Both derived tables keep their original query without speculative allocations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "producer_cardinality_boundaries_keep_subquery_predicates_without_scratch",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_pullup/tests.rs",
+      "capability": "Derived predicate pushdown",
+      "workload": "Filter a derived table with a scalar subquery across LIMIT, OFFSET 0 and grouping sets while a sibling holds all remaining memory.",
+      "invariant": "The outer qualification stays above each producer without allocating transfer workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_access_order_reuses_children_and_charges_only_the_permutation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/access_path/owned.rs",
+      "capability": "Predicate ordering workspace",
+      "workload": "Reorder four large, caller-owned conjunction operands with zero or one kibibyte of scratch.",
+      "invariant": "The input buffer survives, four index slots bound scratch, and an exhausted allowance rejects the permutation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "calibration_renames_the_call_in_its_existing_argument_storage",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
+      "capability": "Implicit fusion calibration",
+      "workload": "Rename a bound text retrieval predicate with a large argument and 32 bytes of free workspace.",
+      "invariant": "The new name replaces only the original name's capacity. The argument vector and selected binding keep their addresses and all reservations release on drop.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_fusion_charges_construction_and_preserves_existing_arguments",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/implicit_fusion/owned/tests.rs",
+      "capability": "Implicit fusion workspace",
+      "workload": "Fuse two caller-owned predicates with a one-mebibyte argument under exhausted, cancelled and 32 KiB operation allowances.",
+      "invariant": "The operation admits new containers, preserves the original argument addresses, reports 53200 or 57014 at rejection, and releases every workspace reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_source_substitution_charges_new_constants_and_preserves_unrelated_payloads",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/source_constants/tests.rs",
+      "capability": "Source constant substitution",
+      "workload": "Propagate a VALUES column beside a 1 MiB projection with exhausted, available and cancelled operation allowances.",
+      "invariant": "The selected literal and projection label preserve their SQL identity, unselected storage keeps its address, and allocation failure or cancellation releases all work.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "cte_initialization_charges_reachability_and_checks_unread_recursive_cycles",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests.rs",
+      "capability": "Common table expression initialization",
+      "workload": "Plan a query and a mutation with an unread erroneous CTE, a zero-byte allowance and mutually recursive unread definitions.",
+      "invariant": "Declaration selection charges the request, preserves lazy scalar initialization and reports SQLSTATE 0A000 for mutual recursion. All workspace releases on return.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_compute_classification_charges_registered_aggregate_observation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests/aggregate_identity.rs",
+      "capability": "Aggregate classification",
+      "workload": "Plan a query against a registered aggregate under zero and 256 KiB operation allowances.",
+      "invariant": "The catalog uses the active allowance for every observation. Exhaustion returns 53200 and successful classification selects aggregate execution.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_projection_alias_charges_only_the_new_label",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Output label allocation",
+      "workload": "Plan a projection with a 1 MiB column name under 32 KiB and 2 MiB allowances, with and without an explicit alias.",
+      "invariant": "The generated label is admitted before publication. Existing syntax keeps its address, explicit aliases survive and the workspace releases after handoff.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "caller_owned_grouping_admits_its_new_vector_before_handoff",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/vectors.rs",
+      "capability": "Grouping key storage",
+      "workload": "Install a generated grouping key in a caller-owned query under zero-byte and eight-kibibyte operation allowances.",
+      "invariant": "Admission precedes the grouping allocation, projection storage survives a successful edit, and a rejected edit releases its partial output.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_and_admitted_traversal_preserve_statement_shape_and_cancellation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/tests/plan_ownership.rs",
+      "capability": "Statement planning ownership",
+      "workload": "Optimize queries, mutations, a cursor and a routine call through both public entry points with separate cancellation tokens.",
+      "invariant": "Both paths produce identical serialized plans and SQLSTATEs. Completed, rejected and cancelled operations release their entire workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "unselected_function_group_keeps_its_wide_argument_without_a_member_copy",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/owned/sources.rs",
+      "capability": "Range function planning",
+      "workload": "Optimize a single unbound ROWS FROM member containing a one-mebibyte argument with eight kibibytes of available workspace.",
+      "invariant": "Both input owners keep the existing argument buffer and its reservation. Allocations stay within the available workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "caller_owned_local_scalar_edit_observes_cancellation_in_the_last_slot",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/children.rs",
+      "capability": "Query scalar editing",
+      "workload": "Cancel each request token in the last scalar of a caller-owned VALUES query and in the last argument of a range function.",
+      "invariant": "The final scalar edit returns SQLSTATE 57014 and releases its workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "caller_owned_subqueries_use_the_operation_allowance_for_remapping",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/children.rs",
+      "capability": "Scalar subquery remapping",
+      "workload": "Compact two caller-owned scalar subqueries with available, exhausted and cancelled remapping allocations.",
+      "invariant": "The remaining slot retains its arena allocation. Exhaustion and cancellation return their own SQLSTATE and release all workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "speculative_query_replacement_preserves_the_input_owner_and_moves_the_destination",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/tests/construction.rs",
+      "capability": "Speculative query replacement",
+      "workload": "Publish a private query rewrite over either caller-owned or admitted syntax, with a live or cancelled request.",
+      "invariant": "Successful output reuses its original projection buffer and keeps the input storage domain. Cancellation releases every constructor reservation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "caller_owned_case_moves_its_existing_column_under_a_tight_work_budget",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/storage_tests.rs",
+      "capability": "Scalar optimizer input ownership",
+      "workload": "Simplify a CASE with an existing four-megabyte column name under a one-kibibyte work allowance.",
+      "invariant": "The selected column retains its original allocation, the unreachable cast is never evaluated, and the operation releases all scratch.",
       "case_names": [
         ""
       ]
@@ -9431,6 +9860,19 @@
     {
       "package": "uqa-storage-sqlite",
       "kind": "lib",
+      "test": "record_read_admission_pins_the_snapshot_before_visiting_once",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/mvcc/tests/admission.rs",
+      "capability": "SQLite MVCC read admission",
+      "workload": "Hold an exclusive rollback-journal writer while a snapshot reads its header, release or cancel the waiter, and return SQLite BUSY from a record visitor.",
+      "invariant": "A blocked snapshot runs its consumer once after admission or zero times after cancellation. A visitor error propagates once and the connection can open another snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
       "test": "managed_allocations_share_one_sync_without_relaxing_durable_receipts",
       "cases": 1,
       "source": "crates/uqa-storage-sqlite/src/mvcc/tests/receipts/allocations.rs",
@@ -10974,6 +11416,19 @@
       "capability": "Private revision point reads",
       "workload": "Resident and spilled records, private tombstones, retained views, savepoint undo, replacement and cancellation.",
       "invariant": "One metadata lookup obtains the exact revision without reading values; private identities, visibility and allowance release remain unchanged.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "command_resolution_preserves_forwarded_revisions_and_advances_changed_markers",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/mvcc/overlay/tests/revisions.rs",
+      "capability": "Private revisions across command snapshots",
+      "workload": "Resident and spilled values and tombstones, two memory allowances, an immutable marker, an unrelated commit, a changed marker precondition and savepoint rollback.",
+      "invariant": "A forwarded write retains its private revision. A changed marker precondition or a new evaluation advances it. A prefix reports the newest revision among its records.",
       "case_names": [
         ""
       ]
@@ -21747,6 +22202,19 @@
       ]
     },
     {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "values_inputs_reuse_the_enclosing_routine_stack",
+      "cases": 1,
+      "case_names": [
+        ""
+      ],
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/retained.rs",
+      "capability": "Bounded folded VALUES retention",
+      "workload": "Optimize standalone VALUES, a derived VALUES source and INSERT VALUES with zero or 4,096 enclosing routine identities.",
+      "invariant": "Each input allocates the same total bytes at both depths. VALUES borrows the enclosing identities during scalar planning."
+    },
+    {
       "package": "uqa-execution",
       "kind": "lib",
       "test": "values_sources_apply_only_the_predicates_placed_on_their_qualifier",
@@ -31757,6 +32225,19 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "retained_and_executable_subqueries_share_the_first_authorization_walk",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
+      "capability": "Bounded authorization of shared scalar subqueries",
+      "workload": "Authorize a query with an executable scalar subquery, a retained one, and a slot shared by a retained and an executable projection.",
+      "invariant": "Each relation is analyzed once in its original order, and selecting a denied column from a discarded projection still raises SQLSTATE 42501.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "complete_select_coverage_borrows_only_checked_original_nodes",
       "cases": 1,
       "source": "crates/uqa-sql/src/semantics/privileges/coverage/tests.rs",
@@ -34152,6 +34633,32 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "strict_null_comparison_folds_without_binding_discarded_array_elements",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Strict NULL folding",
+      "workload": "Compare NULL with an array containing a 1 MiB literal using admitted and caller-owned syntax with 16 KiB of workspace.",
+      "invariant": "The result remains a typed Boolean NULL, the evaluator is never invoked and total scratch allocations stay below 16 KiB.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "null_test_folding_keeps_caller_owned_text_for_evaluation",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
+      "capability": "Caller-owned constant evaluation",
+      "workload": "Apply IS NULL to a one MiB typed text literal using the Engine scalar evaluator under 16 KiB and under one MiB plus 8 KiB of scratch.",
+      "invariant": "The small allowance rejects evaluation with SQLSTATE 53200. The larger allowance returns false and releases all scratch.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "produced_constant_clones_share_payload_metadata_and_live_allowance",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/scalar/constants/tests/production.rs",
@@ -34793,6 +35300,19 @@
       "capability": "Borrowed join predicate inference",
       "workload": "Exhaust an ancestor allowance during union and intersection pruning, cancel either request scope and unwind after success.",
       "invariant": "Reject with 53200 or 57014 at the owning operation, preserve the sibling reservation and release all partial workspace below four KiB additional allocation.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "join_predicate_groups_reuse_masks_and_preserve_order_within_each_join",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/join_reorder/tests/bindings.rs",
+      "capability": "Stable join predicate attachment",
+      "workload": "Assign 8192 predicates to balanced and right-deep 64-relation trees, including residuals and all pairs of relations.",
+      "invariant": "The original mask buffer is sufficient under a zero-byte allowance. Every predicate reaches its lowest covering join in input order and unbound residuals reach the root.",
       "case_names": [
         ""
       ]
@@ -35849,6 +36369,19 @@
     {
       "package": "uqa-planner",
       "kind": "lib",
+      "test": "caller_wildcard_expansion_moves_existing_outputs_within_the_planning_allowance",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/owned/tests.rs",
+      "capability": "Caller-owned wildcard projection expansion",
+      "workload": "Expand a qualified wildcard beside a four MiB literal, repeat with an incompatible output width and with insufficient planning memory.",
+      "invariant": "Accepted and rejected layouts retain the original literal and alias addresses. Planning uses less than 32 KiB and releases all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
       "test": "known_output_demand_borrows_wide_column_names",
       "cases": 1,
       "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
@@ -35868,6 +36401,32 @@
       "capability": "Planning output demand",
       "workload": "Observe all 1,024 required projection aliases without an analyzed row descriptor.",
       "invariant": "Allocate less than 8 KiB without copying label storage or changing the query.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_column_privileges_admit_new_names_and_borrow_existing_identities",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard a qualified column with a 4 MiB qualifier under a 32 KiB planning allowance, with and without the same previously retained privilege. Exercise caller-owned and admitted query plans.",
+      "invariant": "Adding a new identity reports 53200 before copying its name. A previously retained identity permits pruning to a typed NULL without copying the qualifier or losing its privilege. Temporary reservations are released on both paths.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-planner",
+      "kind": "lib",
+      "test": "discarded_output_replacements_respect_the_operation_budget_before_publication",
+      "cases": 1,
+      "source": "crates/uqa-planner/src/optimizer/derived_projection/tests/demand.rs",
+      "capability": "Planning output demand",
+      "workload": "Discard all 128 integer output expressions using a 4 KiB allowance, then repeat with 1 MiB.",
+      "invariant": "Exhaustion returns 53200 with the original query intact. Sufficient memory produces 128 typed NULLs and releases the workspace on return.",
       "case_names": [
         ""
       ]
@@ -39716,6 +40275,19 @@
       "capability": "View mutation authorization ownership",
       "workload": "Four MiB unused definitions and arenas, all mutation kinds and table/column privilege masks, small allowances, both cancellations and callback failure/unwind.",
       "invariant": "Authorization borrows immutable inputs, admits selected subjects and scratch, preserves complete ACL validation and error order, and releases exact request ownership."
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "retained_subquery_authorizes_block_and_lateral_input_columns_in_their_own_scopes",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/privileges/ownership_tests.rs",
+      "capability": "Scoped authorization of shared correlated subqueries",
+      "workload": "Reuse a subquery slot in a lateral function argument and a discarded projection with different visible inputs.",
+      "invariant": "The required columns include the outer relation from the lateral argument and the inner relation from the projection.",
+      "case_names": [
+        ""
+      ]
     },
     {
       "package": "uqa-sql",
@@ -68714,6 +69286,21 @@
       ]
     },
     {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "an_unrelated_commit_preserves_the_prepared_default_of_a_private_table",
+      "cases": 3,
+      "source": "crates/uqa-engine/tests/catalog/pg18_constraint_lifecycle/domain_constraints.rs",
+      "capability": "Prepared defaults across concurrent commits",
+      "workload": "Prepare an insert on a private table in native SQLite, SQLite Key/Value or redb. Commit to another table from a second session, change the domain default and then replace the original default function.",
+      "invariant": "The prepared insert returns 14 after the unrelated commit and 25 after the function replacement. The peer's row survives rollback.",
+      "case_names": [
+        "case_1_sqlite",
+        "case_2_sqlite_key_value",
+        "case_3_redb"
+      ]
+    },
+    {
       "package": "uqa-sql",
       "kind": "lib",
       "test": "database_authority_input_preserves_role_visits_without_copying_names_or_paths",
@@ -75431,6 +76018,71 @@
     {
       "package": "uqa-sql",
       "kind": "lib",
+      "test": "projection_privilege_slots_follow_compaction_in_both_query_owners",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Compact an arena with one unused child, one authorization-only child and one evaluated child, using immediate and single-step execution.",
+      "invariant": "Preserve both retained children and their remapped slots, keep only the evaluated slot in its projection and release both memory budgets.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_owners_release_columns_and_replaced_slot_buffers_independently",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Projection privilege memory",
+      "workload": "Capture and copy column and subquery privileges, add a second slot, clear the columns and release the remaining slots.",
+      "invariant": "Both constructors retain exactly the surviving slot capacity and return to the original allowance after clearing the privileges.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "materialized_definitions_with_discarded_consumers_are_planned_without_scheduling_rows",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/semantics/cte_strategy/tests/control.rs",
+      "capability": "Referenced CTE planning",
+      "workload": "Compare eight SELECT and DELETE statements with folded, volatile, materialized and multiply referenced definitions, with and without a catalog.",
+      "invariant": "Planning includes referenced materialized definitions and their dependencies. None of the discarded consumers schedules a row.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-engine",
+      "kind": "test",
+      "test": "materialized_cte_in_discarded_projection_is_planned_but_never_read",
+      "cases": 1,
+      "source": "crates/uqa-engine/tests/sql_cte.rs",
+      "capability": "Materialized CTE execution",
+      "workload": "Discard and then read a scalar projection that references a sequence through a materialized CTE. Compare SELECT and EXPLAIN on a constant division.",
+      "invariant": "An unread CTE leaves the sequence uncalled. A materialized division reports 22012 during planning and a folded division with a discarded consumer returns 7.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
+      "test": "projection_privilege_slots_remain_in_their_source_during_transfer",
+      "cases": 1,
+      "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
+      "capability": "Retained scalar-query compaction",
+      "workload": "Move an exclusive scalar child and then request a transfer of the remaining privilege-only child.",
+      "invariant": "Remap the retained authority to the surviving source slot, decline its transfer without changing either arena and release all reservations.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-sql",
+      "kind": "lib",
       "test": "native_query_compaction_keeps_namespaces_and_paired_constructor_owners",
       "cases": 1,
       "source": "crates/uqa-sql/src/plan/mutable/arenas/tests.rs",
@@ -78293,6 +78945,110 @@
       "capability": "Right-input preparation in similarity joins",
       "workload": "Compare four-by-four and 32-by-32 inputs for text, vector and hybrid joins with no output pairs.",
       "invariant": "Multiplying each side by eight increases total allocations at most eightfold for every join.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "base_layer_search_releases_upper_distances_and_decodes_each_candidate_once",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/hnsw_index/tests/reads.rs",
+      "capability": "HNSW base-layer distance workspace",
+      "workload": "Warm an upper-level distance, then search all 128 nodes of a 256-coordinate ring.",
+      "invariant": "The base search emits 128 neighbors, releases the upper cache and decodes at most 128 candidate vectors.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "frontier_reuses_membership_and_orders_each_new_priority_with_logarithmic_comparisons",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/diskann_index/search/tests.rs",
+      "capability": "DiskANN bounded frontier work",
+      "workload": "Offer 512 equal-priority candidates in reverse order, repeat each admission and revisit expanded and evicted nodes.",
+      "invariant": "The ordered frontier retains the first 256 node IDs. Duplicates consume no extra distance estimates and comparisons stay within a logarithmic bound per admission.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_top_k_uses_bounded_workspace_in_trained_and_untrained_search",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "Bounded tensor IVF selection",
+      "workload": "Query five of 1,024 documents with two vectors each before and after training under a 4 KiB allowance.",
+      "invariant": "Both routes return the canonical five scores and document IDs and release the complete workspace.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "tensor_maxima_keep_signed_zero_bits_across_element_order_and_top_k",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/query/tests.rs",
+      "capability": "Tensor score reduction",
+      "workload": "Score four tensors whose finite components yield positive or negative zero. Select one or four documents with and without a memory allowance.",
+      "invariant": "Mixed zeros retain positive zero in both orders, negative-only scores retain negative zero and top-k breaks equal scores by document identity.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "probed_tensor_scores_preserve_bits_at_float_extremes_and_ties",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/ivf_index/tests.rs",
+      "capability": "IVF tensor score and ordering equivalence",
+      "workload": "Probe one, two and four centroids across seven query vectors, three top-k limits, ties, subnormals and overflowing dot products.",
+      "invariant": "Each result matches the document IDs and exact score bits of materializing every selected component and then reducing.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage",
+      "kind": "lib",
+      "test": "cached_norms_preserve_every_canonical_score_bit",
+      "cases": 1,
+      "source": "crates/uqa-storage/src/vector_index/cosine/tests.rs",
+      "capability": "Canonical cosine from retained norms",
+      "workload": "Score vector pairs with empty, mismatched, subnormal and overflowing components.",
+      "invariant": "Computing the query norm or both norms ahead of time preserves the canonical f32 score bits.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-storage-sqlite",
+      "kind": "lib",
+      "test": "retained_coordinates_keep_one_flat_tensor_and_reuse_norms_across_queries",
+      "cases": 1,
+      "source": "crates/uqa-storage-sqlite/src/vector_index/brute_force/cache/tests.rs",
+      "capability": "Retained SQLite vector storage",
+      "workload": "Warm the exact index with multiple tensor components and issue a second query on the same read snapshot.",
+      "invariant": "Coordinates use one contiguous array, every retained norm matches the canonical reduction and the second query reuses the snapshot.",
+      "case_names": [
+        ""
+      ]
+    },
+    {
+      "package": "uqa-core",
+      "kind": "lib",
+      "test": "restricting_live_workspace_charges_only_its_receiving_child",
+      "cases": 1,
+      "source": "crates/uqa-core/src/memory/tests.rs",
+      "capability": "Memory ownership transfer into a bounded child",
+      "workload": "Move a live parent allocation into a capped child budget and attempt the same transfer while the child is full.",
+      "invariant": "Ownership transfer charges the child once, preserves the parent peak and leaves the source fully charged when the child rejects admission.",
       "case_names": [
         ""
       ]

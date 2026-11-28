@@ -8,8 +8,9 @@
 
 use super::super::{Copying, MutableQueryPlan, OwnedScalarExpr, QueryChildSlot, RewriteMemory};
 use crate::{
-    plan::{QueryPlan, RelationalPlan},
-    SQLError, ScalarExpr,
+    plan::{subqueries::subquery_id, QueryPlan, RelationalPlan},
+    semantics::subquery_reference,
+    SQLError,
 };
 use uqa_core::memory::{ProductionControl, ProductionMap};
 
@@ -28,7 +29,7 @@ impl MutableQueryPlan {
         let mut selected = ProductionMap::new(*control);
         expression.try_visit(&mut |node| {
             control.check()?;
-            if let Some(id) = query_id(node) {
+            if let Some(id) = subquery_reference(node) {
                 selected.insert_copy(id, ())?;
             }
             Ok::<_, SQLError>(true)
@@ -40,12 +41,20 @@ impl MutableQueryPlan {
         if selected.iter().any(|(id, ())| *id >= width) {
             return Ok((self, destination, expression, false));
         }
+        if let RelationalPlan::QueryBlock(block) = &self.query.root {
+            for id in &block.privilege_subqueries {
+                control.check()?;
+                if *id >= width || selected.get(id).is_some() {
+                    return Ok((self, destination, expression, false));
+                }
+            }
+        }
         let mut exclusive = true;
         let mut checked = Ok(());
         crate::plan::subqueries::visit_root(&mut self.query.root, &mut |node| {
             if checked.is_ok() {
                 checked = control.check();
-                if let Some(id) = query_id(node) {
+                if let Some(id) = subquery_reference(node) {
                     exclusive &= id < width && selected.get(&id).is_none();
                 }
             }
@@ -87,6 +96,12 @@ impl MutableQueryPlan {
             *arena_memory(owner) = memory;
         }
         compact(&mut self, &selected);
+        if let RelationalPlan::QueryBlock(block) = &mut self.query.root {
+            for slot in &mut block.privilege_subqueries {
+                control.check()?;
+                *slot = *retained.get(slot).expect("retained privilege subquery");
+            }
+        }
         let expression = expression.remap_subquery_ids(control, &mut |id| {
             *moved.get(&id).expect("selected expression query")
         })?;
@@ -94,7 +109,7 @@ impl MutableQueryPlan {
         crate::plan::subqueries::visit_root(&mut self.query.root, &mut |node| {
             if checked.is_ok() {
                 checked = control.check();
-                if let Some(id) = query_id_mut(node) {
+                if let Some(id) = subquery_id(node) {
                     *id = *retained.get(id).expect("retained expression query");
                 }
             }
@@ -166,22 +181,4 @@ fn arena_memory(memory: &mut RewriteMemory) -> &mut Option<RewriteMemory> {
         root
     };
     root.field_mut("subqueries")
-}
-
-fn query_id(node: &ScalarExpr) -> Option<usize> {
-    match node {
-        ScalarExpr::ScalarSubquery(id)
-        | ScalarExpr::Exists { subquery: id, .. }
-        | ScalarExpr::InSubquery { subquery: id, .. } => Some(*id),
-        _ => None,
-    }
-}
-
-fn query_id_mut(node: &mut ScalarExpr) -> Option<&mut usize> {
-    match node {
-        ScalarExpr::ScalarSubquery(id)
-        | ScalarExpr::Exists { subquery: id, .. }
-        | ScalarExpr::InSubquery { subquery: id, .. } => Some(id),
-        _ => None,
-    }
 }

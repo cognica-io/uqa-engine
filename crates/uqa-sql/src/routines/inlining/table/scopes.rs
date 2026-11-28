@@ -159,6 +159,7 @@ fn project(body: Box<QueryPlan>, width: usize) -> QueryPlan {
             }),
             windows: Vec::new(),
             privilege_columns: uqa_core::memory::OwnedSet::new(),
+            privilege_subqueries: Vec::new(),
             r#where: None,
             compute: ComputePlan::Project,
             group_by: Vec::new(),

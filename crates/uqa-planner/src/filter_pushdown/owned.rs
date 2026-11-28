@@ -122,6 +122,10 @@ pub(crate) struct PredicateServices<'a> {
     pub volatility: &'a dyn VolatilityCatalog,
 }
 
+pub(crate) fn accepts_output_predicates(block: &QueryBlockPlan) -> bool {
+    block.limit.is_none() && block.offset.is_none() && block.grouping_sets.is_empty()
+}
+
 pub(crate) fn derived_output_predicate(
     services: PredicateServices<'_>,
     block: &QueryBlockPlan,
@@ -132,9 +136,7 @@ pub(crate) fn derived_output_predicate(
     control: &ProductionControl<'_>,
 ) -> Result<Option<OwnedScalarExpr>, SQLError> {
     control.check()?;
-    if block.limit.is_some()
-        || block.offset.is_some()
-        || !block.grouping_sets.is_empty()
+    if !accepts_output_predicates(block)
         || aliases.is_some_and(|aliases| aliases.len() > block.projections.len())
     {
         return Ok(None);

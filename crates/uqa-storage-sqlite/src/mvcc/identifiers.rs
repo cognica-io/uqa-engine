@@ -81,16 +81,13 @@ pub(super) fn read(
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<u64>> {
     let _workspace = reserve_identifier_workspace(namespace, control)?;
-    let transaction = connection.unchecked_transaction()?;
-    native::check_mapping(&transaction, native)?;
-    codec::header(&transaction, database)?;
-    let result = watermark(&transaction, namespace)?;
-    control
-        .cancellation()
-        .check()
-        .map_err(uqa_storage::mvcc::VersionError::from)?;
-    transaction.commit()?;
-    Ok(result)
+    admission::read_header(connection, database, native, control, |read, _| {
+        let result = watermark(read, namespace)?;
+        control
+            .check()
+            .map_err(uqa_storage::mvcc::VersionError::from)?;
+        Ok(result)
+    })
 }
 
 pub(super) fn allocate(

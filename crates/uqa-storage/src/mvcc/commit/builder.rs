@@ -64,7 +64,7 @@ impl PreparedWritesBuilder {
                 write.key(),
                 write.expected(),
                 write.kind(),
-                *identity,
+                write.private_revision().unwrap_or(*identity),
                 write.value(),
                 control,
             ),
@@ -81,7 +81,7 @@ impl PreparedWritesBuilder {
             Target::Resident(writes) => {
                 let changes = PrivateRecordChanges::with_revision_scope(control.memory(), scope);
                 for write in &*writes {
-                    changes.apply_owned(std::slice::from_ref(write), control)?;
+                    changes.adopt_write(write, control)?;
                 }
                 Ok(changes)
             }

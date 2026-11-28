@@ -70,6 +70,7 @@ where
                 Some(selected),
                 std::iter::once(argument),
                 control,
+                control,
                 work,
             )
             .await

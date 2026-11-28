@@ -385,7 +385,7 @@ impl OwnedCapturedViewProjection {
             .discard_source_analysis(control)?
             .replace_source(Some(self.source), control)?
             .replace_where_expression(predicate, control)?
-            .clear_privilege_columns(control)?
+            .clear_projection_privileges(control)?
             .replace_projections(projections.into_iter(), control)?;
         self.source = source(filter, filtered, control)?;
         Ok(self)

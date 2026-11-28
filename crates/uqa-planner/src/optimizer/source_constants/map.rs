@@ -52,6 +52,23 @@ impl Constants {
         }
     }
 
+    pub(super) fn from_source(
+        source: &super::SourcePlan,
+        types: Option<&dyn super::RoutineTypeCatalog>,
+        views: Option<&dyn uqa_sql::semantics::volatility::VolatilityCatalog>,
+        control: &ProductionControl<'_>,
+    ) -> Result<Option<Self>, SQLError> {
+        let mut constants = Self::new(control);
+        let selected = super::production::observe_source(
+            source,
+            types,
+            views,
+            control,
+            &mut |name, value| constants.insert(name, value, control),
+        )?;
+        Ok(selected.then_some(constants))
+    }
+
     pub(super) fn get(&self, name: &str) -> Option<&OwnedScalarExpr> {
         match &self.entries {
             Entries::Ordinary(entries) => entries.get(name),

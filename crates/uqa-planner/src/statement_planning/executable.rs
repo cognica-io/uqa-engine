@@ -339,7 +339,7 @@ pub fn optimize_owned_with_control(
         context.optimization.constant_storage_with_control(control)
     };
     config.constant_storage_factory = Some(crate::optimizer::ConstantStorageFactory(&storage));
-    super::optimize_owned_plan_authorized(
+    super::optimize_plan_authorized(
         context.optimization.statistics(),
         &context.optimization.rule_inputs(),
         context.aggregates,

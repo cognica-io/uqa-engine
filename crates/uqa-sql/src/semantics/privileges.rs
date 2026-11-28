@@ -10,6 +10,7 @@ pub mod columns;
 pub mod coverage;
 mod enforcement;
 
+use super::cte_order::{analysis::CteAnalysis, references::Selection};
 use crate::catalog::roles::RoleReference;
 use std::collections::BTreeSet;
 
@@ -67,14 +68,15 @@ fn collect_column(
     Ok(())
 }
 
-fn collect_expression_columns(
+fn visit_expression_privileges(
     expression: &ScalarExpr,
     scopes: &[&SourceLineage],
     direct_star: bool,
     required: &mut Required,
     control: &ProductionControl<'_>,
     purpose: AnalysisPurpose,
-) -> Result<OwnedSet<usize>, SQLError> {
+    mut visit_subquery: impl FnMut(usize, &mut Required) -> Result<(), SQLError>,
+) -> Result<(), SQLError> {
     control.check()?;
     if direct_star {
         match expression {
@@ -82,13 +84,13 @@ fn collect_expression_columns(
                 if let Some(scope) = scopes.iter().find(|scope| !scope.output.is_empty()) {
                     scope.require_all(required, control)?;
                 }
-                return Ok(OwnedSet::new());
+                return Ok(());
             }
             ScalarExpr::QualifiedStar(qualifier) => {
                 if let Some(scope) = scopes.iter().find(|scope| scope.has_qualifier(qualifier)) {
                     scope.require_qualified_all(qualifier, required, control)?;
                 }
-                return Ok(OwnedSet::new());
+                return Ok(());
             }
             _ => {}
         }
@@ -145,7 +147,10 @@ fn collect_expression_columns(
         }
         Ok::<bool, SQLError>(true)
     })?;
-    Ok(subquery_ids)
+    for slot in subquery_ids {
+        visit_subquery(slot, required)?;
+    }
+    Ok(())
 }
 
 fn collect_expression_and_subqueries(
@@ -157,22 +162,31 @@ fn collect_expression_and_subqueries(
     universe: &mut SourceLineage,
     required: &mut Required,
 ) -> Result<(), SQLError> {
-    for subquery in collect_expression_columns(
+    visit_expression_privileges(
         expression,
         scopes,
         direct_star,
         required,
         &ctes.control(),
         ctes.purpose,
-    )? {
-        let plan = subqueries.get(subquery).ok_or_else(|| {
-            SQLError::Internal(format!(
-                "column privilege analysis cannot resolve scalar subquery slot {subquery}"
-            ))
-        })?;
-        analyze_query_plan(plan, ctes, scopes, universe, required)?;
-    }
-    Ok(())
+        |slot, required| analyze_subquery_slot(slot, subqueries, ctes, scopes, universe, required),
+    )
+}
+
+fn analyze_subquery_slot(
+    slot: usize,
+    subqueries: &[QueryPlan],
+    ctes: &CteScope<'_, impl AsRef<[QueryPlan]>>,
+    scopes: &[&SourceLineage],
+    universe: &mut SourceLineage,
+    required: &mut Required,
+) -> Result<(), SQLError> {
+    let plan = subqueries.get(slot).ok_or_else(|| {
+        SQLError::Internal(format!(
+            "column privilege analysis cannot resolve scalar subquery slot {slot}"
+        ))
+    })?;
+    analyze_query_plan(plan, ctes, scopes, universe, required)
 }
 
 fn analyze_join_source_lineage(
@@ -425,16 +439,40 @@ fn analyze_query_block(
             ctes.purpose,
         )?;
     }
-    for projection in &block.projections {
-        collect_expression_and_subqueries(
-            &projection.expr,
+    let retained = match ctes.purpose {
+        AnalysisPurpose::Authorization => block.privilege_subqueries.as_slice(),
+        _ => &[],
+    };
+    for &slot in retained {
+        ctes.control().check()?;
+        analyze_subquery_slot(slot, &block.subqueries, ctes, &scopes, universe, required)?;
+    }
+    // Retained slots have already been analyzed against this block's complete lineage. FROM inputs and join predicates use their own column scopes.
+    let mut collect = |expression: &ScalarExpr, direct_star| {
+        visit_expression_privileges(
+            expression,
             &scopes,
-            true,
-            &block.subqueries,
-            ctes,
-            universe,
+            direct_star,
             required,
-        )?;
+            &ctes.control(),
+            ctes.purpose,
+            |slot, required| {
+                if retained.binary_search(&slot).is_err() {
+                    analyze_subquery_slot(
+                        slot,
+                        &block.subqueries,
+                        ctes,
+                        &scopes,
+                        universe,
+                        required,
+                    )?;
+                }
+                Ok(())
+            },
+        )
+    };
+    for projection in &block.projections {
+        collect(&projection.expr, true)?;
     }
     for expression in block
         .r#where
@@ -443,15 +481,7 @@ fn analyze_query_block(
         .chain(block.grouping_sets.iter().flatten())
         .chain(block.having.iter())
     {
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     for expression in block
         .order_by
@@ -464,26 +494,10 @@ fn analyze_query_block(
         {
             continue;
         }
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     for expression in block.limit.iter().chain(block.offset.iter()) {
-        collect_expression_and_subqueries(
-            expression,
-            &scopes,
-            false,
-            &block.subqueries,
-            ctes,
-            universe,
-            required,
-        )?;
+        collect(expression, false)?;
     }
     Ok(())
 }
@@ -534,9 +548,13 @@ fn analyze_query_plan_in_scope(
         let root = columns::stored::ctes(&plan.ctes, ctes, outer_scopes, universe, required)?;
         return analyze_relational_plan(&plan.root, &root, outer_scopes, universe, required);
     }
+    let selection = if ctes.purpose == AnalysisPurpose::Authorization {
+        Selection::Authorization
+    } else {
+        Selection::Reachable
+    };
     let reachable =
-        crate::semantics::cte_order::analysis::CteAnalysis::query(plan, ctes.control())?
-            .reachable()?;
+        CteAnalysis::query_with_selection(plan, ctes.control(), selection)?.reachable()?;
     let mut root_ctes = ctes.reborrow()?;
     let mut preceding_ctes = root_ctes.reborrow()?;
     for (index, cte) in plan.ctes.iter().enumerate() {

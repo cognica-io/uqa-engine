@@ -47,23 +47,18 @@ impl SQLiteDocumentStore {
     pub(super) fn put_stored_inner(
         &self,
         doc_id: DocId,
-        document: &Document,
+        mut fields: impl Iterator<Item = (String, Value)>,
         metadata: DocumentMetadata,
         unused: Option<uqa_storage::document_store::identifiers::DocumentIdNamespace>,
     ) -> SQLiteResult<()> {
         if self
-            .write_native(|read, batch| read.put(batch, doc_id, document, metadata, unused))?
+            .write_native(|read, batch| read.put(batch, doc_id, fields.by_ref(), metadata, unused))?
             .is_some()
         {
             return Ok(());
         }
         let sqlite_doc_id = sqlite_doc_id(doc_id)?;
-        let document: Document = document
-            .iter()
-            .filter(|(_, value)| !matches!(value, uqa_core::Value::Null))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        let (document, blobs) = encode_document_blobs(document)?;
+        let (document, blobs) = encode_document_blobs(fields)?;
         let body = serde_json::to_string(&document)?;
         self.conn.with(|c| {
             c.prepare_cached(&format!(

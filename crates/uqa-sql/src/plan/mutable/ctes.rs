@@ -17,13 +17,23 @@ use uqa_core::memory::ProductionControl;
 impl MutableQueryPlan {
     /// Rewrite one CTE body while preserving its query/command kind and original declaration box. Its name, columns and scheduling metadata stay with the parent query.
     pub fn map_cte(
-        mut self,
+        self,
         index: usize,
         control: &ProductionControl<'_>,
         map: impl FnOnce(MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_cte(index, control, map)
+    }
+
+    /// Map a CTE body while retaining the callback's typed error.
+    pub fn try_map_cte<E: From<SQLError>>(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(MutableExecutablePlan) -> Result<MutableExecutablePlan, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let mut slot = self.cte_slot(index);
         let output = map(slot.take())?;
         slot.complete(output, control, "CTE")?;
@@ -39,13 +49,23 @@ impl MutableQueryPlan {
 impl MutableCommandPlan {
     /// Rewrite a data-modifying command's CTE without copying its declaration or enclosing box.
     pub fn map_cte(
-        mut self,
+        self,
         index: usize,
         control: &ProductionControl<'_>,
         map: impl FnOnce(MutableExecutablePlan) -> Result<MutableExecutablePlan, SQLError>,
     ) -> Result<Self, SQLError> {
+        self.try_map_cte(index, control, map)
+    }
+
+    /// Map a mutation CTE body while retaining the callback's typed error.
+    pub fn try_map_cte<E: From<SQLError>>(
+        mut self,
+        index: usize,
+        control: &ProductionControl<'_>,
+        map: impl FnOnce(MutableExecutablePlan) -> Result<MutableExecutablePlan, E>,
+    ) -> Result<Self, E> {
         self.assert_owner(control);
-        control.check()?;
+        control.check().map_err(SQLError::from)?;
         let mut slot = self.cte_slot(index);
         let output = map(slot.take())?;
         slot.complete(output, control, "CTE")?;

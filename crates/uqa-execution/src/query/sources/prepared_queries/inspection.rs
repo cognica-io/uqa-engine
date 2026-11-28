@@ -80,7 +80,17 @@ fn inspect_query<S: Clone>(
                     return Ok(true);
                 }
             }
-            inspect_children(&block.subqueries, scope, &local, control)
+            let privilege_only = block.privilege_only_subquery_slots(control)?;
+            inspect_children(
+                block
+                    .subqueries
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(slot, plan)| privilege_only.get(&slot).is_none().then_some(plan)),
+                scope,
+                &local,
+                control,
+            )
         }
         RelationalPlan::SetOp {
             left,
@@ -101,8 +111,8 @@ fn inspect_query<S: Clone>(
     }
 }
 
-fn inspect_children<S: Clone>(
-    queries: &[QueryPlan],
+fn inspect_children<'p, S: Clone>(
+    queries: impl IntoIterator<Item = &'p QueryPlan>,
     scope: &CteScope<S>,
     names: &Names<'_>,
     control: ProductionControl<'_>,

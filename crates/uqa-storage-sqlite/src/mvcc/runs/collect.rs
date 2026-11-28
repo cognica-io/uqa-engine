@@ -6,14 +6,14 @@
 
 //! Coalesce only current revisions at or before the oldest retained snapshot.
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, types::ValueRef, Connection, Row};
 use uqa_storage::{
     mvcc::{CommitSequence, VersionError},
     read_control::StorageReadControl,
 };
 
 use super::{suffix, Bounds, PhysicalResult, Run, MAX_COUNT, MAX_KEY, MAX_VALUE};
-use crate::mvcc::read;
+use crate::mvcc::{codec, read};
 
 pub(in crate::mvcc) fn compact(
     connection: &Connection,
@@ -21,19 +21,35 @@ pub(in crate::mvcc) fn compact(
     control: &StorageReadControl,
 ) -> PhysicalResult<()> {
     let mut pending: Option<Run> = None;
-    read::point_keys(connection, b"", None, usize::MAX, control, &mut |key| {
-        let next = candidate(connection, key, horizon, control)?;
+    // Include an empty position for an ineligible key so it still ends a pending run. Only completed ranges behind the current key are removed.
+    let mut scan = connection.prepare_cached(
+        "SELECT h.sequence, h.compacted, m.sequence, m.payload_length,
+             CASE WHEN h.compacted = 0 AND h.sequence <= ?1 AND m.payload_length BETWEEN 0 AND ?3 THEN
+                 (SELECT v.value FROM _uqa_mvcc_versions v WHERE v.version_id = m.version_id AND v.key = h.key AND v.sequence = m.sequence AND length(v.value) <= ?3) END,
+             CASE WHEN length(h.key) BETWEEN 8 AND ?2 THEN h.key END
+         FROM _uqa_mvcc_heads h LEFT JOIN _uqa_mvcc_version_metadata m
+           ON length(h.key) BETWEEN 8 AND ?2 AND m.key = h.key AND m.sequence =
+                (SELECT max(p.sequence) FROM _uqa_mvcc_version_metadata p WHERE p.key = h.key)
+         ORDER BY h.key",
+    )?;
+    let mut rows = scan.query(params![
+        horizon.as_u64().to_be_bytes().as_slice(),
+        i64::try_from(MAX_KEY).expect("bounded key length"),
+        i64::try_from(MAX_VALUE).expect("bounded template")
+    ])?;
+    while let Some(row) = rows.next()? {
+        control.check().map_err(VersionError::from)?;
+        let next = candidate(row, horizon, control)?;
         if let (Some(run), Some(next)) = (pending.as_mut(), next.as_ref()) {
             if extend(run, next) {
-                return Ok(Some(true));
+                continue;
             }
         }
         if let Some(run) = pending.take() {
             persist(connection, &run, control)?;
         }
         pending = next;
-        Ok(Some(true))
-    })?;
+    }
     if let Some(run) = pending {
         persist(connection, &run, control)?;
     }
@@ -41,15 +57,15 @@ pub(in crate::mvcc) fn compact(
 }
 
 fn candidate(
-    connection: &Connection,
-    key: &[u8],
+    row: &Row<'_>,
     horizon: CommitSequence,
     control: &StorageReadControl,
 ) -> PhysicalResult<Option<Run>> {
-    if !(8..=MAX_KEY).contains(&key.len()) {
+    if matches!(row.get_ref(5)?, ValueRef::Null) {
         return Ok(None);
     }
-    let Some(info) = read::info(connection, key, CommitSequence::from_u64(u64::MAX))? else {
+    let key = codec::bytes(row, 5)?;
+    let Some(info) = read::point_info(row, CommitSequence::from_u64(u64::MAX))? else {
         return Err(VersionError::InvalidEncoding("compaction head disappeared").into());
     };
     if info.revision > horizon.as_u64() || info.length.is_some_and(|length| length > MAX_VALUE) {
@@ -68,21 +84,18 @@ fn candidate(
     };
     run.bounds.first[..key.len()].copy_from_slice(key);
     run.bounds.last[..key.len()].copy_from_slice(key);
-    read::value(
-        connection,
-        key,
-        run.bounds.sequence,
-        control,
-        &mut |record| {
-            let record = record.ok_or(VersionError::InvalidEncoding(
-                "compaction record disappeared",
-            ))?;
-            if let Some(value) = record.value {
-                run.template[..value.len()].copy_from_slice(value);
-            }
+    if info.length.is_some() {
+        read::inline_value(row, info, MAX_VALUE, control, &mut |record| {
+            let value =
+                record
+                    .and_then(|record| record.value)
+                    .ok_or(VersionError::InvalidEncoding(
+                        "compaction record disappeared",
+                    ))?;
+            run.template[..value.len()].copy_from_slice(value);
             Ok(())
-        },
-    )?;
+        })?;
+    }
     Ok(Some(run))
 }
 
@@ -139,8 +152,7 @@ fn persist(connection: &Connection, run: &Run, control: &StorageReadControl) -> 
         "DELETE FROM _uqa_mvcc_versions WHERE version_id IN (SELECT version_id FROM _uqa_mvcc_version_metadata WHERE key >= ?1 AND key <= ?2 AND length(key) = ?3)",
         "DELETE FROM _uqa_mvcc_heads WHERE key >= ?1 AND key <= ?2 AND length(key) = ?3",
     ] {
-        connection.execute(
-            sql,
+        connection.prepare_cached(sql)?.execute(
             params![
                 run.bounds.first(),
                 run.bounds.last(),
