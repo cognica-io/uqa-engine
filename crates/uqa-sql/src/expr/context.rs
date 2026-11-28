@@ -584,6 +584,7 @@ pub struct EvalContext<'a> {
     pub params: &'a [SQLParam],
     pub engine: Option<&'a dyn EngineHook>,
     enum_comparison_states: [Option<&'a super::enums::EnumComparisonState>; 4],
+    builtins: Option<&'a dyn super::PreparedBuiltinCalls>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -594,6 +595,7 @@ impl<'a> EvalContext<'a> {
             params,
             engine: None,
             enum_comparison_states: [None; 4],
+            builtins: None,
         }
     }
 
@@ -607,12 +609,25 @@ impl<'a> EvalContext<'a> {
             params,
             engine: None,
             enum_comparison_states: [None; 4],
+            builtins: None,
         }
     }
 
     pub fn with_engine(mut self, engine: &'a dyn EngineHook) -> Self {
         self.engine = Some(engine);
         self
+    }
+
+    pub fn with_prepared_builtins(mut self, sites: &'a dyn super::PreparedBuiltinCalls) -> Self {
+        self.builtins = Some(sites);
+        self
+    }
+
+    pub(super) fn builtin_metadata(
+        &self,
+        binding: &crate::ast::FunctionBinding,
+    ) -> Option<&super::BuiltinCallMetadata> {
+        self.builtins?.builtin_metadata(binding)
     }
 
     /// The state of the current bound enum call, supplied by its prepared execution owner.

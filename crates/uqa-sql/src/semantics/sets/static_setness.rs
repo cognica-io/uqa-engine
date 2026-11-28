@@ -5,7 +5,7 @@
 //
 
 //! Catalog-only set-returning routine classification before physical traversal.
-use super::validation::builtin_returns_set;
+use super::validation::{bound_builtin_returns_set, builtin_returns_set};
 use crate::ast::FunctionBinding;
 use crate::SQLError;
 use uqa_core::memory::ProductionControl;
@@ -68,10 +68,7 @@ pub fn builtin_call_returns_set(name: &str, binding: Option<&FunctionBinding>) -
     }) {
         return false;
     }
-    let name = binding
-        .map_or(name, |binding| binding.name.as_str())
-        .to_ascii_lowercase();
-    builtin_returns_set(name.strip_prefix("pg_catalog.").unwrap_or(&name))
+    bound_builtin_returns_set(binding.map_or(name, |binding| binding.name.as_str()))
 }
 
 /// Whether `expression` contains a call that returns a set, outside its subqueries, classified from the catalog alone: a bound call by its routine, an unbound call by every visible routine of its name.

@@ -117,7 +117,7 @@ fn controlled_math_preserves_unicode_decimal_encoding_split_and_checksum_results
             .unwrap();
         assert_eq!(&*output, &expected, "{name}");
         assert_eq!(
-            eval_math_functions(name, &args).unwrap().unwrap(),
+            crate::expr::tests::eval_scalar_function(name, &args).unwrap(),
             expected,
             "{name}"
         );
@@ -156,12 +156,30 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
             vec![Value::Null, Value::Int(0), Value::Int(1), Value::Int(1)],
         ),
     ] {
-        let ordinary = eval_math_functions(name, &args).unwrap().unwrap_err();
+        let ordinary =
+            eval_math_functions_with_control(name, &args, &ProductionControl::uncontrolled())
+                .unwrap()
+                .unwrap_err();
         let error = eval_math_functions_with_control(name, &args, &control)
             .unwrap()
             .unwrap_err();
         assert_eq!(error.to_string(), ordinary.to_string());
     }
+    let null_input = [Value::Null, Value::Int(0), Value::Int(1), Value::Int(1)];
+    assert_eq!(
+        crate::expr::tests::eval_scalar_function("width_bucket", &null_input).unwrap(),
+        Value::Null
+    );
+    assert_eq!(
+        *super::super::scalar_dispatch::eval_generated_scalar_function(
+            "width_bucket",
+            &null_input,
+            &control,
+            crate::ast::FunctionBinding::selected_input_collation(None),
+        )
+        .unwrap(),
+        Value::Null
+    );
     let missing = eval_math_functions_with_control("format", &[text("%s")], &control)
         .unwrap()
         .unwrap_err();
@@ -170,9 +188,11 @@ fn scalar_null_and_error_precedence_stays_shared_without_admitting_copies() {
     assert_eq!(budget.used(), 0);
     assert!(eval_math_functions_with_control("random", &[], &control).is_none());
     assert_eq!(
-        eval_math_functions("format", &[text("%s:%L"), Value::Bool(true), Value::Int(7)])
-            .unwrap()
-            .unwrap(),
+        crate::expr::tests::eval_scalar_function(
+            "format",
+            &[text("%s:%L"), Value::Bool(true), Value::Int(7)]
+        )
+        .unwrap(),
         text("t:'7'")
     );
     assert_eq!(budget.used(), 0);

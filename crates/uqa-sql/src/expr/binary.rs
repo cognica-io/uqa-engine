@@ -116,7 +116,8 @@ pub(super) fn eval_binary(
     .map(|value| value.into_uncontrolled().expect("ordinary binary result"))
 }
 
-pub(super) fn is_arithmetic(op: BinaryOp) -> bool {
+#[must_use]
+pub fn is_arithmetic(op: BinaryOp) -> bool {
     matches!(
         op,
         BinaryOp::Add | BinaryOp::Subtract | BinaryOp::Multiply | BinaryOp::Divide

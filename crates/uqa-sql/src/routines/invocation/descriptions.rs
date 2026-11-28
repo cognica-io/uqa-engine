@@ -95,7 +95,7 @@ impl RoutineCallDescriptions {
         control: &ProductionControl<'_>,
     ) -> Result<(), SQLError> {
         control.check()?;
-        if self.description.get().is_some() || !eligible(binding, sources.len()) {
+        if self.description.get().is_some() || !eligible(binding, sources.len(), control)? {
             return Ok(());
         }
         match RoutineCallDescription::new(binding, function, sources, scope, control) {
@@ -109,34 +109,32 @@ impl RoutineCallDescriptions {
     }
 }
 
-fn eligible(binding: &FunctionBinding, count: usize) -> bool {
-    !binding.builtin
-        && binding.object_id.is_some()
-        && binding.invocation.as_ref().is_some_and(|invocation| {
-            invocation.argument_sources.len() == count
-                && invocation.argument_positions.len() == count
-                && invocation.argument_targets.len() == count
-                && invocation
-                    .argument_sources
-                    .iter()
-                    .all(|name| name.as_deref().is_none_or(fixed_name))
-                && invocation
-                    .argument_targets
-                    .iter()
-                    .all(|name| fixed_name(name))
-                && invocation
-                    .parameter_types
-                    .iter()
-                    .all(|name| fixed_name(name))
-        })
-}
-
-fn fixed_name(name: &str) -> bool {
-    crate::ast::UserTypeIdentity::parse(name).is_some()
-        || crate::parse_regtype_name(name)
-            .ok()
-            .flatten()
-            .is_some_and(|name| name.names.len() == 2)
+fn eligible(
+    binding: &FunctionBinding,
+    count: usize,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let Some(invocation) = binding.invocation.as_ref().filter(|invocation| {
+        !binding.builtin
+            && binding.object_id.is_some()
+            && invocation.argument_sources.len() == count
+            && invocation.argument_positions.len() == count
+            && invocation.argument_targets.len() == count
+    }) else {
+        return Ok(false);
+    };
+    for name in invocation
+        .argument_sources
+        .iter()
+        .flatten()
+        .chain(&invocation.argument_targets)
+        .chain(&invocation.parameter_types)
+    {
+        if !crate::compiler::fixed_type_name_with_control(name, control)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn conversion_slots<T>(

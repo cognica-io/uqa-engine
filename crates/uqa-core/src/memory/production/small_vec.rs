@@ -18,20 +18,14 @@ enum Buffer<A: Array> {
     Controlled(BudgetedSmallVec<A>),
 }
 
-/// Copy-only inline scratch; every heap allocation remains with its existing reservation owner. Cancellation during movement can leave partial scratch contents; discard the scratch after an error.
-pub struct ProductionSmallVec<'a, A: Array>
-where
-    A::Item: Copy,
-{
+/// Inline scratch owns its elements and the reservation for any spilled buffer. Cancellation during movement can leave partial scratch contents; discard the scratch after an error.
+pub struct ProductionSmallVec<'a, A: Array> {
     buffer: Buffer<A>,
     control: ProductionControl<'a>,
     start: usize,
 }
 
-impl<'a, A: Array> ProductionSmallVec<'a, A>
-where
-    A::Item: Copy,
-{
+impl<'a, A: Array> ProductionSmallVec<'a, A> {
     pub fn new(control: ProductionControl<'a>) -> Self {
         let buffer = control.budget().map_or_else(
             || Buffer::Ordinary(SmallVec::new()),
@@ -44,35 +38,54 @@ where
         }
     }
 
-    pub fn push(&mut self, value: A::Item) -> Result<(), ValueRetentionError> {
+    /// Admit the complete destination before moving any incoming elements.
+    pub fn reserve(&mut self, additional: usize) -> Result<(), ValueRetentionError> {
         self.control.check()?;
-        let full = match &self.buffer {
-            Buffer::Ordinary(values) => values.len() == values.capacity(),
-            Buffer::Controlled(values) => values.len() == values.capacity(),
+        let (len, capacity) = match &self.buffer {
+            Buffer::Ordinary(values) => (values.len(), values.capacity()),
+            Buffer::Controlled(values) => (values.len(), values.capacity()),
         };
-        if full && self.start != 0 {
+        if additional <= capacity - len {
+            return Ok(());
+        }
+        if self.start != 0 {
             self.compact()?;
         }
         match &mut self.buffer {
             Buffer::Ordinary(values) => {
-                if values.len() == values.capacity() {
-                    let capacity = values
+                let required = values
+                    .len()
+                    .checked_add(additional)
+                    .ok_or(MemoryError::SizeOverflow)?;
+                if required > values.capacity() {
+                    let geometric = values
                         .len()
                         .checked_add(1)
                         .and_then(|n| n.checked_mul(2))
                         .ok_or(MemoryError::SizeOverflow)?;
                     let mut replacement = Vec::new();
                     replacement
-                        .try_reserve_exact(capacity)
+                        .try_reserve_exact(required.max(geometric))
                         .map_err(MemoryError::from)?;
-                    for chunk in values.chunks((4096 / size_of::<A::Item>().max(1)).max(1)) {
+                    let step = (4096 / size_of::<A::Item>().max(1)).max(1);
+                    let mut remaining = values.drain(..);
+                    while remaining.len() != 0 {
                         self.control.check()?;
-                        replacement.extend_from_slice(chunk);
+                        replacement.extend(remaining.by_ref().take(step));
                     }
+                    drop(remaining);
                     *values = SmallVec::from_vec(replacement);
                 }
-                values.push(value);
             }
+            Buffer::Controlled(values) => values.reserve(additional)?,
+        }
+        self.control.check()
+    }
+
+    pub fn push(&mut self, value: A::Item) -> Result<(), ValueRetentionError> {
+        self.reserve(1)?;
+        match &mut self.buffer {
+            Buffer::Ordinary(values) => values.push(value),
             Buffer::Controlled(values) => values.push(value)?,
         }
         self.control.check()
@@ -116,7 +129,10 @@ where
         self.control.check()
     }
 
-    pub fn remove(&mut self, index: usize) -> Result<A::Item, ValueRetentionError> {
+    pub fn remove(&mut self, index: usize) -> Result<A::Item, ValueRetentionError>
+    where
+        A::Item: Copy,
+    {
         self.control.check()?;
         let value = self[index];
         if index == 0 {
@@ -140,7 +156,10 @@ where
     }
 
     /// Consume an observed prefix without shifting the retained suffix. Later growth compacts it once before allocating more capacity.
-    pub fn remove_prefix(&mut self, count: usize) -> Result<(), ValueRetentionError> {
+    pub fn remove_prefix(&mut self, count: usize) -> Result<(), ValueRetentionError>
+    where
+        A::Item: Copy,
+    {
         assert!(count <= self.len());
         self.control.check()?;
         self.start += count;
@@ -159,7 +178,7 @@ where
         };
         for position in 0..remaining {
             self.control.check()?;
-            values[position] = values[position + start];
+            values.swap(position, position + start);
         }
         match &mut self.buffer {
             Buffer::Ordinary(values) => values.truncate(remaining),
@@ -170,10 +189,7 @@ where
     }
 }
 
-impl<A: Array> std::ops::Deref for ProductionSmallVec<'_, A>
-where
-    A::Item: Copy,
-{
+impl<A: Array> std::ops::Deref for ProductionSmallVec<'_, A> {
     type Target = [A::Item];
     fn deref(&self) -> &Self::Target {
         match &self.buffer {
@@ -183,10 +199,7 @@ where
     }
 }
 
-impl<A: Array> std::ops::DerefMut for ProductionSmallVec<'_, A>
-where
-    A::Item: Copy,
-{
+impl<A: Array> std::ops::DerefMut for ProductionSmallVec<'_, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         match &mut self.buffer {
             Buffer::Ordinary(values) => &mut values[self.start..],

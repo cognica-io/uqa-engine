@@ -41,16 +41,24 @@ fn input_record(result: Option<&AnalyzedResult>) -> Option<&[Option<ColumnType>]
         .map(AsRef::as_ref)
 }
 
-pub(super) fn fixed_result(definition: &CreateFunction) -> bool {
-    let mut outputs = definition.output_params();
-    if outputs.clone().next().is_some() {
-        return outputs.all(|parameter| super::fixed_name(&parameter.type_name));
+pub(super) fn fixed_result(
+    definition: &CreateFunction,
+    control: &ProductionControl<'_>,
+) -> Result<bool, SQLError> {
+    let mut outputs = definition.output_params().peekable();
+    if outputs.peek().is_some() {
+        for parameter in outputs {
+            if !crate::compiler::fixed_type_name_with_control(&parameter.type_name, control)? {
+                return Ok(false);
+            }
+        }
+        return Ok(true);
     }
     match &definition.returns {
         FunctionReturns::Scalar { type_name } | FunctionReturns::SetOf { type_name } => {
-            super::fixed_name(type_name)
+            crate::compiler::fixed_type_name_with_control(type_name, control)
         }
-        FunctionReturns::None | FunctionReturns::Table => true,
+        FunctionReturns::None | FunctionReturns::Table => Ok(true),
     }
 }
 
@@ -143,7 +151,7 @@ impl RoutineCallDescription {
         let layout = sql_function_result_layout(types, definition, result)?;
         if reusable
             && self.body_result.get().is_none()
-            && fixed_result(definition)
+            && fixed_result(definition, &environment.control)?
             && self.is_current((environment.scope)().as_ref())
         {
             match ResultDescription::new(result, &layout, &environment.control) {

@@ -18,12 +18,17 @@ use super::json::{jsonpath_candidate, jsonpath_match};
 use super::random;
 use super::scalar_dispatch::{eval_scalar_function_with_context, eval_sequence_function};
 
+type EvaluatedArguments = Vec<(Option<String>, Value)>;
+
+mod arguments;
+use arguments::MovedArguments;
 mod named;
 mod production;
 mod temporal;
 pub use named::builtin_named_args;
 pub use production::{
-    eval_builtin_function_call_with_control, eval_generated_function_call_with_control,
+    eval_bound_builtin_function_call, eval_builtin_function_call_with_control,
+    eval_generated_function_call_with_control,
 };
 
 /// Execute a scalar function after its argument expressions have already been evaluated.
@@ -33,7 +38,7 @@ pub use production::{
 /// An unbound call recorded no input collation, so collation-dependent built-ins use the database default collation.
 pub fn eval_function_call(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
     eval_function_call_inner(name, call_args, ctx, true, default_collation())
@@ -43,20 +48,10 @@ pub fn eval_function_call(
 /// runtime callbacks and SQL routines must not override this stable binding.
 pub fn eval_builtin_function_call(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
 ) -> Result<Value> {
     eval_function_call_inner(name, call_args, ctx, false, default_collation())
-}
-
-/// Execute a bound built-in with the input collation its binding retained, `PostgreSQL`'s `inputcollid`.
-pub(super) fn eval_selected_builtin_function_call(
-    name: &str,
-    call_args: Vec<(Option<String>, Value)>,
-    ctx: &EvalContext<'_>,
-    collation: u32,
-) -> Result<Value> {
-    eval_function_call_inner(name, call_args, ctx, false, collation)
 }
 
 fn default_collation() -> u32 {
@@ -69,7 +64,7 @@ fn default_collation() -> u32 {
 )]
 fn eval_function_call_inner(
     name: &str,
-    call_args: Vec<(Option<String>, Value)>,
+    call_args: EvaluatedArguments,
     ctx: &EvalContext<'_>,
     allow_dynamic_dispatch: bool,
     collation: u32,
@@ -94,30 +89,36 @@ fn eval_function_call_inner(
     } else {
         call_args
     };
-    let evaluated: Vec<Value> = call_args.iter().map(|(_, value)| value.clone()).collect();
+    if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
+        return result;
+    }
+    let named = call_args.iter().any(|(name, _)| name.is_some());
+    let control = uqa_core::memory::ProductionControl::uncontrolled();
+    let moved = MovedArguments::new(
+        control.finish(call_args, control.empty_reservation())?,
+        &control,
+    )?;
+    let evaluated = &*moved.values;
 
-    if let Some(result) = super::current_time::eval_current_time(lower, &evaluated, Some(ctx)) {
+    if let Some(result) = super::current_time::eval_current_time(lower, evaluated, Some(ctx)) {
         return result;
     }
 
     if lower == "current_setting" {
-        return super::session_settings::current_setting(&evaluated, ctx);
+        return super::session_settings::current_setting(evaluated, ctx);
     }
     if lower == "set_config" {
-        return super::session_settings::set_config(&evaluated, ctx);
+        return super::session_settings::set_config(evaluated, ctx);
     }
-    if let Some(result) = super::session_sleep::eval_session_sleep(lower, &evaluated, ctx) {
+    if let Some(result) = super::session_sleep::eval_session_sleep(lower, evaluated, ctx) {
         return result;
     }
 
-    if let Some(result) = random::eval_random_function(lower, &call_args, ctx) {
-        return result;
-    }
     if lower == "random" && !evaluated.is_empty() {
         return Err(SQLError::TypeMismatch("random takes no arguments".into()));
     }
     if lower == "setseed" {
-        let [value] = evaluated.as_slice() else {
+        let [value] = evaluated else {
             return Err(SQLError::TypeMismatch("setseed takes 1 arg".into()));
         };
         let seed = to_f64(value)?;
@@ -151,7 +152,7 @@ fn eval_function_call_inner(
         return Ok(schema.map_or(Value::Null, Value::Str));
     }
     if lower == "current_schemas" {
-        let [Value::Bool(include_implicit)] = evaluated.as_slice() else {
+        let [Value::Bool(include_implicit)] = evaluated else {
             return Err(SQLError::TypeMismatch(
                 "current_schemas takes one boolean argument".into(),
             ));
@@ -205,7 +206,7 @@ fn eval_function_call_inner(
         _ => None,
     };
     if let Some(regobject_type) = regobject_type {
-        let [value] = evaluated.as_slice() else {
+        let [value] = evaluated else {
             return Err(SQLError::BadArity {
                 name: lower.into(),
                 expected: "1".into(),
@@ -234,8 +235,8 @@ fn eval_function_call_inner(
     // knn_match, ...) are dispatched by the relational/access-path
     // executor. JSONPath fts_match is the scalar exception.
     if crate::registry::is_registered(lower) {
-        if lower == "fts_match" && jsonpath_candidate(&evaluated) {
-            return jsonpath_match(&evaluated);
+        if lower == "fts_match" && jsonpath_candidate(evaluated) {
+            return jsonpath_match(evaluated);
         }
         return Err(SQLError::Unsupported(format!(
             "scalar evaluation of `{name}` is not supported (use the function registry)"
@@ -243,7 +244,8 @@ fn eval_function_call_inner(
     }
 
     let returns_set = crate::semantics::sets::validation::builtin_returns_set(lower);
-    if call_args.iter().any(|(name, _)| name.is_some()) {
+    if named {
+        let call_args = moved.into_pairs(&control)?;
         if !returns_set {
             if let Some(positional) = builtin_named_args(
                 lower,
@@ -263,28 +265,28 @@ fn eval_function_call_inner(
 
     // Sequence functions use engine-owned session state and therefore precede pure built-in dispatch.
     if matches!(lower, "nextval" | "currval" | "lastval" | "setval") {
-        return eval_sequence_function(lower, &evaluated, ctx);
+        return eval_sequence_function(lower, evaluated, ctx);
     }
     if let Some(engine) = ctx
         .engine
         .filter(|engine| allow_dynamic_dispatch && engine.has_scalar_functions())
     {
-        if let Some(result) = engine.call_scalar_function(lower, &evaluated) {
+        if let Some(result) = engine.call_scalar_function(lower, evaluated) {
             return result;
         }
     }
     if lower == "date_trunc" {
-        if let Some(result) = super::time::truncate_session_zone(&evaluated, ctx) {
+        if let Some(result) = super::time::truncate_session_zone(evaluated, ctx) {
             return result;
         }
     }
-    if let Some(result) = temporal::extract_session_zone(lower, &evaluated, ctx) {
+    if let Some(result) = temporal::extract_session_zone(lower, evaluated, ctx) {
         return result;
     }
     if matches!(lower, "coalesce" | "nullif" | "greatest" | "least") {
         return super::scalar_core::selection_with_context(
             lower,
-            &evaluated,
+            evaluated,
             &uqa_core::memory::ProductionControl::uncontrolled(),
             ctx,
         )
@@ -294,10 +296,11 @@ fn eval_function_call_inner(
                 .expect("ordinary selection result")
         });
     }
-    match eval_scalar_function_with_context(lower, &evaluated, ctx, collation) {
+    match eval_scalar_function_with_context(lower, evaluated, ctx, collation) {
         // Unknown built-in: fall through to user-defined functions,
         // mirroring PostgreSQL's search-path order.
         Err(SQLError::UnknownFunction(_)) => {
+            let call_args = moved.into_pairs(&control)?;
             if let Some(engine) = ctx.engine.filter(|_| allow_dynamic_dispatch) {
                 if let Some(result) = engine.call_user_function(lower, &call_args) {
                     return result;

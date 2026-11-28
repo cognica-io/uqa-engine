@@ -89,9 +89,7 @@ fn immutable_leafs_share_ordinary_null_arity_and_value_semantics() {
         let output = evaluate(name, &args, &control);
         assert_eq!(*output, expected, "{name}");
         assert_eq!(
-            super::super::eval_postgres_functions(name, &args)
-                .unwrap()
-                .unwrap(),
+            crate::expr::tests::eval_scalar_function(name, &args).unwrap(),
             expected
         );
         assert_eq!(budget.used(), output.reserved_bytes());
@@ -107,9 +105,7 @@ fn immutable_leafs_share_ordinary_null_arity_and_value_semantics() {
         let controlled = eval_postgres_immutable_with_control(name, &args, &control)
             .unwrap()
             .unwrap_err();
-        let ordinary = super::super::eval_postgres_functions(name, &args)
-            .unwrap()
-            .unwrap_err();
+        let ordinary = crate::expr::tests::eval_scalar_function(name, &args).unwrap_err();
         assert_eq!(controlled.to_string(), ordinary.to_string());
         assert_eq!(budget.used(), 0);
     }
@@ -138,8 +134,7 @@ fn factorial_matches_postgresql_numeric_range_and_diagnostics() {
         assert_eq!(value.to_sql_string(), expected);
         assert_eq!(budget.used(), output.reserved_bytes());
         assert_eq!(
-            super::super::eval_postgres_functions("factorial", &[Value::Int(argument)])
-                .unwrap()
+            crate::expr::tests::eval_scalar_function("factorial", &[Value::Int(argument)])
                 .unwrap(),
             *output
         );
@@ -321,9 +316,7 @@ fn string_array_preserves_empty_delimiters_unicode_markers_and_one_based_bounds(
             }
         );
         assert_eq!(
-            super::super::eval_postgres_functions("string_to_array", &args)
-                .unwrap()
-                .unwrap(),
+            crate::expr::tests::eval_scalar_function("string_to_array", &args).unwrap(),
             *output
         );
         assert_eq!(budget.used(), output.reserved_bytes());

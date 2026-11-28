@@ -56,6 +56,16 @@ impl<T> StateEntries<T> {
         }
     }
 }
+impl<K: Ord + Copy, T> StateEntries<(K, T)> {
+    pub(super) fn finish_index(
+        mut self,
+    ) -> (Vec<(K, T)>, Option<uqa_core::memory::MemoryReservation>) {
+        self.sort_unstable_by_key(|(key, _)| *key);
+        self.dedup_by_key(|(key, _)| *key);
+        self.into_parts()
+    }
+}
+
 impl<T> std::ops::Deref for StateEntries<T> {
     type Target = [T];
     fn deref(&self) -> &Self::Target {

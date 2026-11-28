@@ -113,12 +113,36 @@ impl<'a> ScalarEvalContext<'a> {
             .and_then(|states| states.row_cast(operand))
     }
 
+    pub(super) fn builtin(
+        &self,
+        binding: &uqa_sql::ast::FunctionBinding,
+    ) -> Option<&super::state::PreparedBuiltin> {
+        self.function_states
+            .and_then(|states| states.builtin(binding))
+    }
+
+    pub(super) fn operand_metadata(
+        &self,
+        operand: &super::ScalarExpr,
+    ) -> Option<&super::state::OperandMetadata> {
+        self.function_states
+            .and_then(|states| states.operand_metadata(operand))
+    }
+
     pub(super) fn numeric_operator(
         &self,
         arguments: &[super::ScalarExpr],
     ) -> Option<&std::sync::OnceLock<super::state::NumericCall>> {
         self.function_states
             .and_then(|states| states.numeric_operator(arguments))
+    }
+
+    pub(super) fn array_constructor(
+        &self,
+        items: &[super::ScalarExpr],
+    ) -> Option<&super::state::ArrayConstructorState> {
+        self.function_states
+            .and_then(|states| states.array_constructor(items))
     }
 
     pub(super) fn row_constructor(
@@ -179,6 +203,10 @@ impl<'a> ScalarEvalContext<'a> {
             || EvalContext::new(self.row, self.params),
             |row| EvalContext::from_row_lookup(row, self.params),
         );
+        let context = match self.function_states {
+            Some(sites) => context.with_prepared_builtins(sites),
+            None => context,
+        };
         match self.function_hook {
             Some(hook) => context.with_engine(hook),
             None => context,

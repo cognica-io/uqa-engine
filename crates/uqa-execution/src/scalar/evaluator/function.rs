@@ -33,7 +33,7 @@ pub(super) fn evaluate_expression(
     if let Some(clause) = uqa_sql::catalog::collations::expression::scalar_clause(expression)? {
         return eval_scalar_inner(clause.argument, context, control);
     }
-    initialize_call(name, binding, context, control)?;
+    let call = initialize_call(name, binding, context, control)?;
     if let Some(dispatch) = binding.and_then(|binding| binding.dispatch) {
         if let Some(result) = uqa_sql::expr::eval_distinct_boolean(dispatch, args.len(), |index| {
             let value = eval_scalar_inner(&args[index], context, control)?;
@@ -42,7 +42,7 @@ pub(super) fn evaluate_expression(
             return plain(result?, control);
         }
     }
-    evaluate_function(name, binding, args, context, control)
+    evaluate_function(name, binding, args, call, context, control)
 }
 
 /// Check a call before any argument is evaluated, as `PostgreSQL`'s `ExecInitFunc` does: EXECUTE on the selected built-in, then whether the built-in returns a set, which the one value this expression needs cannot accept.
@@ -51,22 +51,31 @@ fn initialize_call(
     binding: Option<&FunctionBinding>,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
-) -> Result<(), SQLError> {
+) -> Result<super::super::state::BuiltinCall, SQLError> {
     if let (Some(binding), Some(hook)) = (binding, context.function_hook()) {
         hook.require_builtin_execute_with_control(binding, control)?;
     }
-    if binding.is_some_and(|binding| binding.builtin)
-        && uqa_sql::semantics::sets::static_setness::builtin_call_returns_set(name, binding)
-    {
+    let (call, returns_set) = match binding.and_then(|binding| context.builtin(binding)) {
+        Some(site) => (site.call, site.metadata.returns_set()),
+        None => (
+            super::super::state::BuiltinCall::classify(name, binding),
+            binding.is_some_and(|binding| binding.builtin)
+                && uqa_sql::semantics::sets::static_setness::builtin_call_returns_set(
+                    name, binding,
+                ),
+        ),
+    };
+    if returns_set {
         return Err(uqa_sql::semantics::sets::placement::set_valued_call_error());
     }
-    Ok(())
+    Ok(call)
 }
 
 fn evaluate_function(
     name: &str,
     binding: Option<&FunctionBinding>,
     args: &[ScalarExpr],
+    call: super::super::state::BuiltinCall,
     context: &ScalarEvalContext<'_>,
     control: &ProductionControl<'_>,
 ) -> Result<Produced<Value>, SQLError> {
@@ -76,15 +85,11 @@ fn evaluate_function(
         return numeric(operator, binding, args, context, control);
     }
     if let Some(predicate) = context.retrieval_predicate() {
-        if binding.is_none_or(|binding| binding.builtin)
-            && uqa_sql::semantics::retrieval_function(name)
-            // This name also dispatches scalar JSONPath expressions, including paths supplied by parameters or expressions.
-            && !name.eq_ignore_ascii_case("fts_match")
-        {
+        if call.name == super::super::state::NamedCall::Retrieval {
             return plain(Value::Bool(predicate(name, args)?), control);
         }
     }
-    if name.eq_ignore_ascii_case("coalesce") && binding.is_none_or(|binding| binding.builtin) {
+    if call.name == super::super::state::NamedCall::Coalesce {
         for argument in args {
             let value = eval_scalar_inner(argument, context, control)?;
             if !matches!(*value, Value::Null) {
@@ -101,8 +106,12 @@ fn evaluate_function(
     if let Some(result) = array_access(binding, args, context, control) {
         return result;
     }
-    let arguments = eval_call_arguments_with_control(args, context, control)?;
-    let arguments = if binding.is_none_or(|binding| binding.builtin) {
+    let arguments = if call.positional {
+        super::super::call_arguments::eval_positional_arguments(args, context, control)?
+    } else {
+        eval_call_arguments_with_control(args, context, control)?
+    };
+    let arguments = if !call.positional && binding.is_none_or(|binding| binding.builtin) {
         match super::super::call_arguments::expand_variadic_any_arguments(
             binding.map_or(name, |binding| binding.name.as_str()),
             args,
@@ -247,12 +256,7 @@ fn numeric(
     if let Some(super::super::state::NumericCall::Resolved { operation, schema }) =
         slot.and_then(std::sync::OnceLock::get)
     {
-        let same_schema = match (schema, context.row_schema()) {
-            (None, None) => true,
-            (Some(retained), Some(current)) => current.shares_index(retained),
-            _ => false,
-        };
-        if same_schema {
+        if super::super::state::same_schema(schema.as_ref(), context.row_schema()) {
             return operation.evaluate(&values, control);
         }
     }

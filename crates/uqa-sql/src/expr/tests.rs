@@ -67,7 +67,7 @@ fn boolean_conditions_observe_retained_fields_and_preserve_short_circuit_errors(
 }
 
 /// The ordinary scalar kernels, with collation-dependent functions under the database default collation.
-fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
+pub(super) fn eval_scalar_function(name: &str, args: &[Value]) -> crate::error::Result<Value> {
     super::eval_scalar_function(
         name,
         args,

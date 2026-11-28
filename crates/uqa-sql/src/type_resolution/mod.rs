@@ -45,6 +45,7 @@ pub(crate) use common::unnest_result_type;
 pub use field_selection::relation_column as relation_field_column;
 pub use field_selection::relation_column_ref as relation_field_column_ref;
 mod fixed_builtin;
+pub(crate) use fixed_builtin::bound_result_type;
 #[cfg(test)]
 pub(crate) use fixed_builtin::overloads as fixed_builtin_overloads;
 pub(crate) use fixed_builtin::overloads_with_control as fixed_builtin_overloads_with_control;
@@ -99,8 +100,10 @@ pub use scalar_input::{
     scalar_array_element_oid_with_control, scalar_array_element_type_with_control,
     scalar_array_input_type_with_control, scalar_cast_source_type_name_with_control,
     scalar_integer_operation_width, scalar_integer_operation_width_with_control,
+    scalar_negation_source_with_control, scalar_operand_is_real_with_control,
     scalar_operand_type_name, scalar_operand_type_name_with_control,
     scalar_operand_type_with_engine_and_control, scalar_record_field_type_with_control,
+    OperandTypeScope, ScalarNegationSource, ScalarTypeObservation,
 };
 pub(crate) use stored_constants::store_syntax_operand_coercions;
 pub use stored_constants::{

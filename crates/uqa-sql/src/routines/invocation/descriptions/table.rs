@@ -37,7 +37,7 @@ impl RoutineCallDescription {
         let layout = declared_sql_function_result(types, definition)?;
         if reusable
             && self.table_result.get().is_none()
-            && super::body::fixed_result(definition)
+            && super::body::fixed_result(definition, &environment.control)?
             && self.is_current((environment.scope)().as_ref())
         {
             match retained_layout(&layout, &environment.control) {

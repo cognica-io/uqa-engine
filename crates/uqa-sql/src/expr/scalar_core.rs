@@ -20,16 +20,6 @@ mod numeric;
 mod text;
 pub(super) use text::concatenate_text;
 
-pub(super) fn eval_core_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
-    eval_core_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(|result| {
-        result.map(|value| {
-            value
-                .into_uncontrolled()
-                .expect("ordinary core function has no retained owner")
-        })
-    })
-}
-
 /// Whether a built-in call by this name reads its input collation without a registered catalog signature that would bind it. Analysis keeps such a call bound by name, so its selection reaches execution; the case-mapping functions and pattern operators already keep their selected bindings.
 pub(crate) fn binds_input_collation_by_name(name: &str) -> bool {
     matches!(

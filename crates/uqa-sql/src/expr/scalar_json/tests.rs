@@ -35,7 +35,9 @@ fn assert_value(name: &str, args: &[Value], expected: Value) {
         assert_eq!(memory.used(), value.capacity());
     }
     assert_eq!(
-        eval_json_functions(name, args, None).unwrap().unwrap(),
+        *eval_json_functions_with_control(name, args, &ProductionControl::uncontrolled())
+            .unwrap()
+            .unwrap(),
         expected
     );
     drop(result);
@@ -48,6 +50,17 @@ fn immutable_json_reads_preserve_type_extraction_numeric_and_containment_rules()
         assert_value(name, &[json(r#"{"x":null}"#)], text("object"));
         assert_value(name, &[text("not JSON")], text("string"));
         assert_value(name, &[Value::Null], text("null"));
+        let sql_null = crate::expr::tests::eval_scalar_function(name, &[Value::Null]).unwrap();
+        assert_eq!(sql_null, Value::Null, "{name}(NULL)");
+        let json_null = if name == "json_typeof" {
+            json("null")
+        } else {
+            jsonb("null")
+        };
+        assert_eq!(
+            crate::expr::tests::eval_scalar_function(name, &[json_null]).unwrap(),
+            text("null")
+        );
     }
     for name in ["json_array_length", "jsonb_array_length"] {
         assert_value(name, &[json("[1,null,[]]")], Value::Int(3));

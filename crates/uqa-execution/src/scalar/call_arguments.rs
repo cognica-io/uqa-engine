@@ -39,14 +39,35 @@ pub(super) fn eval_call_arguments_with_control(
     control: &ProductionControl<'_>,
 ) -> Result<Produced<EvaluatedArguments>, SQLError> {
     let decoded = uqa_sql::ir::scalar_call_arguments_with_control(arguments, control)?;
+    evaluate_arguments(
+        decoded.iter().map(|arg| (arg.name, arg.value)),
+        context,
+        control,
+    )
+}
+
+pub(super) fn eval_positional_arguments(
+    arguments: &[ScalarExpr],
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<EvaluatedArguments>, SQLError> {
+    evaluate_arguments(
+        arguments.iter().map(|argument| (None, argument)),
+        context,
+        control,
+    )
+}
+
+fn evaluate_arguments<'a>(
+    arguments: impl ExactSizeIterator<Item = (Option<&'a str>, &'a ScalarExpr)>,
+    context: &ScalarEvalContext<'_>,
+    control: &ProductionControl<'_>,
+) -> Result<Produced<EvaluatedArguments>, SQLError> {
     let mut output = ProductionVec::new(*control);
-    output.reserve(decoded.len())?;
-    for argument in &*decoded {
-        let name = argument
-            .name
-            .map(|name| control.copy_text(name))
-            .transpose()?;
-        let value = eval_scalar_inner(argument.value, context, control)?;
+    output.reserve(arguments.len())?;
+    for (name, expression) in arguments {
+        let name = name.map(|name| control.copy_text(name)).transpose()?;
+        let value = eval_scalar_inner(expression, context, control)?;
         let (value, value_memory) = value.into_parts();
         let (name, name_memory) = name.map_or_else(
             || (None, control.empty_reservation()),

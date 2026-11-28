@@ -10,18 +10,6 @@ use super::conversion::to_f64_with_control;
 use super::{point_xy, Result, SQLError, Value};
 use uqa_core::memory::{Produced, ProductionControl, ProductionVec};
 
-pub(super) fn eval_geospatial_functions(name: &str, args: &[Value]) -> Option<Result<Value>> {
-    eval_geospatial_functions_with_control(name, args, &ProductionControl::uncontrolled()).map(
-        |result| {
-            result.map(|value| {
-                value
-                    .into_uncontrolled()
-                    .expect("ordinary geospatial result")
-            })
-        },
-    )
-}
-
 pub(super) fn eval_geospatial_functions_with_control(
     name: &str,
     args: &[Value],

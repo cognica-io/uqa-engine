@@ -160,7 +160,11 @@ fn fixed_type_spelling_uses_the_sql_parser_and_bound_identity_contract() {
         "\"odd.schema\".\"Type Name\"[]",
         "pg_catalog.numeric(8,2)",
     ] {
-        assert!(fixed_name(name), "{name}");
+        assert!(
+            crate::compiler::fixed_type_name_with_control(name, &ProductionControl::uncontrolled())
+                .unwrap(),
+            "{name}"
+        );
     }
     for name in [
         "selected",
@@ -168,7 +172,14 @@ fn fixed_type_spelling_uses_the_sql_parser_and_bound_identity_contract() {
         "public.selected; SELECT 1",
         "",
     ] {
-        assert!(!fixed_name(name), "{name}");
+        assert!(
+            !crate::compiler::fixed_type_name_with_control(
+                name,
+                &ProductionControl::uncontrolled()
+            )
+            .unwrap(),
+            "{name}"
+        );
     }
     assert!(!CatalogCastScope::default().matches(&CatalogCastScope::default()));
     let scope = CatalogCastScope::default();

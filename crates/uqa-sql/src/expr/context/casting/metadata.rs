@@ -18,7 +18,7 @@ use std::sync::Arc;
 pub struct CatalogCastScope(Arc<()>);
 
 impl CatalogCastScope {
-    fn matches(&self, other: &Self) -> bool {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
     }
 }
@@ -138,10 +138,18 @@ pub fn cast_value_with_scoped_resolution(
             catalog: None,
         });
     }
-    let scope = engine
-        .and_then(EngineHook::catalog_cast_scope)
-        .filter(|_| fixed_name(target) && source.is_none_or(fixed_name))
-        .cloned();
+    let scope = match engine.and_then(EngineHook::catalog_cast_scope) {
+        Some(scope)
+            if crate::compiler::fixed_type_name_with_control(target, control)?
+                && match source {
+                    Some(name) => crate::compiler::fixed_type_name_with_control(name, control)?,
+                    None => true,
+                } =>
+        {
+            Some(scope.clone())
+        }
+        _ => None,
+    };
     let types = CastTypes::resolve(source, target, engine, control)?;
     let mut resolved = None;
     let value = cast_with_resolved_types(
@@ -177,14 +185,6 @@ pub fn cast_value_with_scoped_resolution(
         resolved,
         catalog,
     })
-}
-
-fn fixed_name(name: &str) -> bool {
-    crate::ast::UserTypeIdentity::parse(name).is_some()
-        || crate::parse_regtype_name(name)
-            .ok()
-            .flatten()
-            .is_some_and(|name| name.names.len() == 2)
 }
 
 #[cfg(test)]
