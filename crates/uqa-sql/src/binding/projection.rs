@@ -193,8 +193,11 @@ pub fn validate_query_block_expression_types_with_control(
 ) -> Result<(), SQLError> {
     control.check()?;
     let mut scalar_subquery_schemas = crate::production::Buffer::new(control);
-    for plan in &statement.subqueries {
-        scalar_subquery_schemas.push(
+    let privilege_only = statement.privilege_only_subquery_slots(*control)?;
+    for (slot, plan) in statement.subqueries.iter().enumerate() {
+        let output = if privilege_only.get(&slot).is_some() {
+            None
+        } else {
             Some(super::production::bind_query_plan_schema_with_control(
                 routines,
                 plan,
@@ -202,9 +205,9 @@ pub fn validate_query_block_expression_types_with_control(
                 ctes.copy_with_control(control)?,
                 Some(schema),
                 control,
-            )?),
-            control,
-        )?;
+            )?)
+        };
+        scalar_subquery_schemas.push(output, control)?;
     }
     let resolver = QueryFunctionTypeResolver {
         routines,

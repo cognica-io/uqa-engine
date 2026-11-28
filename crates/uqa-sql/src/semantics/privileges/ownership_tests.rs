@@ -379,11 +379,11 @@ fn discarded_projection_subqueries_keep_cte_authority_without_materializing_defi
     let scope = catalog.scope(&control);
     let mut plan = query("WITH cold AS (SELECT id FROM public.samples), chain AS (SELECT (SELECT id FROM cold) AS id) SELECT (SELECT id FROM chain) AS discarded, 7 AS used");
 
-    let verify = |plan: &QueryPlan, executed: &[bool], references: &[bool]| {
+    let verify = |plan: &QueryPlan, executed: &[bool]| {
         let analysis = CteAnalysis::query(plan, control).unwrap();
         assert_eq!(analysis.reachable().unwrap().as_slice(), executed);
-        for (index, expected) in references.iter().enumerate() {
-            assert_eq!(analysis.single_reference(index), *expected);
+        for index in 0..plan.ctes.len() {
+            assert!(analysis.single_reference(index));
         }
         let mut universe = SourceLineage::default();
         let mut required = Required::new();
@@ -405,7 +405,7 @@ fn discarded_projection_subqueries_keep_cte_authority_without_materializing_defi
         );
         ensure_required_select(&universe, &required, &scope).unwrap();
     };
-    verify(&plan, &[true, true], &[true, true]);
+    verify(&plan, &[true, true]);
 
     let RelationalPlan::QueryBlock(block) = &mut plan.root else {
         panic!("block")
@@ -415,13 +415,13 @@ fn discarded_projection_subqueries_keep_cte_authority_without_materializing_defi
         &mut block.projections[0].expr,
         ScalarExpr::Literal(uqa_core::Value::Null),
     );
-    verify(&plan, &[false, false], &[true, false]);
+    verify(&plan, &[false, false]);
 
     let RelationalPlan::QueryBlock(block) = &mut plan.root else {
         panic!("block")
     };
     block.projections[1].expr = shared;
-    verify(&plan, &[true, true], &[true, true]);
+    verify(&plan, &[true, true]);
 
     let crate::plan::CtePlanBody::Query(chain) = &mut plan.ctes[1].body else {
         panic!("CTE query")
@@ -431,7 +431,7 @@ fn discarded_projection_subqueries_keep_cte_authority_without_materializing_defi
     };
     block.preserve_projection_privileges([0], &control).unwrap();
     block.projections[0].expr = ScalarExpr::Literal(uqa_core::Value::Null);
-    verify(&plan, &[false, true], &[false, true]);
+    verify(&plan, &[false, true]);
     drop(scope);
     assert_eq!(memory.used(), 0);
 }

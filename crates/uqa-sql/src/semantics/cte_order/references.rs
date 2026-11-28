@@ -7,14 +7,12 @@
 //! Borrow nested lexical namespaces while reporting references to enclosing definitions.
 
 use crate::{
-    plan::{
-        CommandPlan, CtePlan, CtePlanBody, QueryBlockPlan, QueryPlan, RelationalPlan, SourcePlan,
-    },
+    plan::{CommandPlan, CtePlan, CtePlanBody, QueryPlan, RelationalPlan, SourcePlan},
     SQLError,
 };
 use std::cell::RefCell;
 use uqa_core::{
-    memory::{ProductionControl, ProductionMap, ProductionVec},
+    memory::{ProductionControl, ProductionVec},
     RelationIdentity, RelationName,
 };
 
@@ -213,8 +211,8 @@ pub(in crate::semantics) fn query_root(
             if let Some(input) = &block.from {
                 source(input, external, control, selection)?;
             }
-            if selection != Selection::Authorization && !block.privilege_subqueries.is_empty() {
-                privilege_only = Some(privilege_only_slots(block, control)?);
+            if selection == Selection::Reachable && !block.privilege_subqueries.is_empty() {
+                privilege_only = Some(block.privilege_only_subquery_slots(control)?);
             }
             &block.subqueries
         }
@@ -240,28 +238,6 @@ pub(in crate::semantics) fn query_root(
         }
     }
     Ok(())
-}
-
-/// A retained permission can share its slot with a surviving expression. Only slots whose last executable reference disappeared are excluded from CTE execution and reference counts.
-fn privilege_only_slots<'c>(
-    block: &QueryBlockPlan,
-    control: ProductionControl<'c>,
-) -> Result<ProductionMap<'c, usize, ()>, SQLError> {
-    let mut slots = ProductionMap::new(control);
-    for &slot in &block.privilege_subqueries {
-        slots.insert_copy(slot, ())?;
-    }
-    block.try_visit_expressions(&mut |expression| {
-        expression.try_visit(&mut |node| -> Result<bool, SQLError> {
-            control.check()?;
-            if let Some(slot) = crate::semantics::subquery_reference(node) {
-                slots.remove(&slot);
-            }
-            Ok(!slots.is_empty())
-        })?;
-        Ok::<_, SQLError>(!slots.is_empty())
-    })?;
-    Ok(slots)
 }
 
 fn source(

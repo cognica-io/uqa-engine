@@ -17,17 +17,14 @@ impl Context<'_, '_> {
     ) -> Result<MutableCommandPlan, SQLError> {
         let control = &self.scalars().storage;
         command = command.prune_subqueries_with_workspace(control, &self.config.production)?;
-        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
-            uqa_sql::plan::PlanRef::Command(&command),
-            self.config.production,
-        )?;
-        for (index, &selected) in reachable.iter().enumerate() {
+        let planned = self.planned_ctes(uqa_sql::plan::PlanRef::Command(&command))?;
+        for (index, &selected) in planned.iter().enumerate() {
             self.config.production.check()?;
             if selected {
                 command = command.map_cte(index, control, |body| self.plan(body))?;
             }
         }
-        drop(reachable);
+        drop(planned);
         match &*command {
             CommandPlan::Insert(_) => self.insert(command),
             CommandPlan::Update(_) => self.update(command),

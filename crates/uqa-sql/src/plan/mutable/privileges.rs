@@ -26,6 +26,31 @@ impl QueryBlockPlan {
         !self.privilege_columns.is_empty() || !self.privilege_subqueries.is_empty()
     }
 
+    /// Return the local slots retained solely for column and table permissions. A slot also referenced by an executable expression still participates in typing and preparation.
+    pub fn privilege_only_subquery_slots<'c>(
+        &self,
+        control: ProductionControl<'c>,
+    ) -> Result<ProductionMap<'c, usize, ()>, SQLError> {
+        let mut slots = ProductionMap::new(control);
+        for &slot in &self.privilege_subqueries {
+            slots.insert_copy(slot, ())?;
+        }
+        if slots.is_empty() {
+            return Ok(slots);
+        }
+        self.try_visit_expressions(&mut |expression| {
+            let finished = expression.try_any_node(|node| -> Result<bool, SQLError> {
+                control.check()?;
+                if let Some(slot) = crate::semantics::subquery_reference(node) {
+                    slots.remove(&slot);
+                }
+                Ok(slots.is_empty())
+            })?;
+            Ok::<_, SQLError>(!finished)
+        })?;
+        Ok(slots)
+    }
+
     /// Record column and scalar-query references before replacing caller-owned projection expressions.
     pub fn preserve_projection_privileges(
         &mut self,

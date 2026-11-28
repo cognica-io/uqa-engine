@@ -151,6 +151,19 @@ impl<'a, 'scope> Context<'a, 'scope> {
         }
     }
 
+    fn planned_ctes(
+        &self,
+        statement: uqa_sql::plan::PlanRef<'_>,
+    ) -> Result<uqa_core::memory::Produced<Vec<bool>>, SQLError> {
+        uqa_sql::semantics::planned_cte_declarations_with_control(
+            statement,
+            self.config
+                .routine_inlining
+                .map(|catalog| catalog.volatility),
+            self.config.production,
+        )
+    }
+
     pub(in crate::optimizer) fn query(
         &self,
         mut query: MutableQueryPlan,
@@ -162,17 +175,14 @@ impl<'a, 'scope> Context<'a, 'scope> {
             .apply_grouping(storage)?
             .prune_subqueries_with_workspace(storage, control)?;
         query = self.prune_cte_outputs(query)?;
-        let reachable = uqa_sql::semantics::reachable_cte_declarations_with_control(
-            uqa_sql::plan::PlanRef::Query(&query),
-            *control,
-        )?;
-        for (index, &selected) in reachable.iter().enumerate() {
+        let planned = self.planned_ctes(uqa_sql::plan::PlanRef::Query(&query))?;
+        for (index, &selected) in planned.iter().enumerate() {
             control.check()?;
             if selected {
                 query = query.map_cte(index, storage, |body| self.plan(body))?;
             }
         }
-        drop(reachable);
+        drop(planned);
         match &query.root {
             RelationalPlan::QueryBlock(_) => return self.block(query),
             RelationalPlan::SetOp { .. } => {

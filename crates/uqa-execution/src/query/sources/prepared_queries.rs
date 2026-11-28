@@ -254,9 +254,16 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
                 outer,
                 &control,
             )?;
+            let privilege_only = block.privilege_only_subquery_slots(control)?;
             prepare_subqueries(
                 context,
-                &mut block.subqueries,
+                block
+                    .subqueries
+                    .iter_mut()
+                    .enumerate()
+                    .filter_map(|(slot, query)| {
+                        privilege_only.get(&slot).is_none().then_some(query)
+                    }),
                 params,
                 &scope,
                 Some(&expression_schema),
@@ -280,9 +287,9 @@ fn prepare_query<S: Clone + Send + Sync + 'static>(
     Ok(())
 }
 
-fn prepare_subqueries<S: Clone + Send + Sync + 'static>(
+fn prepare_subqueries<'p, S: Clone + Send + Sync + 'static>(
     context: &SourceContext<'_, S>,
-    queries: &mut [QueryPlan],
+    queries: impl IntoIterator<Item = &'p mut QueryPlan>,
     params: &[SQLParam],
     scope: &CteScope<S>,
     outer: Option<&RowSchema>,

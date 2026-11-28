@@ -217,6 +217,10 @@ impl<'p, 'c> CteAnalysis<'p, 'c> {
             .filter_map(|(index, present)| present.then_some(index))
     }
 
+    pub(crate) fn has_reference(&self, index: usize) -> bool {
+        self.counts[index] != 0
+    }
+
     pub(crate) fn single_reference(&self, index: usize) -> bool {
         self.counts[index] == 1
     }

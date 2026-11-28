@@ -78,6 +78,24 @@ pub trait VolatilityCatalog {
     }
 }
 
+/// Builtin classifications for standalone planners without session routines or catalog views.
+pub(super) struct BuiltinVolatilityCatalog;
+impl VolatilityCatalog for BuiltinVolatilityCatalog {
+    fn host_function_volatility(&self, _: &str) -> Option<FunctionVolatility> {
+        None
+    }
+    fn routine_volatilities(
+        &self,
+        _: &str,
+        _: Option<&FunctionBinding>,
+    ) -> Option<Vec<FunctionVolatility>> {
+        None
+    }
+    fn view_query(&self, _: &str) -> Result<Option<QueryPlan>, SQLError> {
+        Ok(None)
+    }
+}
+
 /// Resolve the volatility of the implementation that can run for `name`.
 ///
 /// Rust extension callbacks default to `VOLATILE`, while registrations with
